@@ -1,0 +1,11 @@
+{
+  "id": "cpa-pools-and-aliases",
+  "name": "Pools and Aliases",
+  "description": "One page to set model aliases for every subscription and API key, so models from different providers pool under one name (opus, sonnet, workers...). Writes CPA's native aliases; routing stays untouched.",
+  "author": "ngvoicu",
+  "repository": "https://github.com/ngvoicu/cpa-pools-and-aliases",
+  "logo": "https://raw.githubusercontent.com/ngvoicu/cpa-pools-and-aliases/main/assets/logo.svg",
+  "homepage": "https://github.com/ngvoicu/cpa-pools-and-aliases",
+  "license": "MIT",
+  "tags": ["Management", "Model Alias", "Pool", "Dashboard"]
+}
