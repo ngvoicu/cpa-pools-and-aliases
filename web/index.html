@@ -141,7 +141,6 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
       <div class="row">
         <span class="hint">Columns:</span>
         <button class="chip on" data-kind="auth">Accounts</button>
-        <button class="chip on" data-kind="channel">All accounts (global)</button>
         <button class="chip on" data-kind="apikey">API keys</button>
         <button class="btn" id="reload" title="Reload from CPA">↻ Reload</button>
         <a class="btn ghost" id="newtab" href="#" target="_blank" rel="noopener" title="Open in a new tab">↗</a>
@@ -151,7 +150,7 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
     <div class="grid-wrap"><table id="grid"></table></div>
     <div class="legend">
       <span><i class="sw" style="background:var(--accent-bg);border:1px solid rgba(62,207,142,.5)"></i>alias set on this source</span>
-      <span><i class="sw" style="border:1px solid var(--info)"></i>inherited from "All accounts"</span>
+      <span><i class="sw" style="border:1px solid var(--info)"></i>↳ inherited from a global alias in config (oauth.model-alias)</span>
       <span><i class="sw" style="outline:2px solid var(--warn)"></i>unsaved change</span>
       <span>“keep originals” = the real model names stay visible next to the alias (fork)</span>
     </div>
@@ -478,7 +477,9 @@ function plan() {
 let kinds = new Set(JSON.parse(localStorage.getItem(STORE_KINDS) || '["auth","channel","apikey"]'));
 function visibleSources() {
   const order = { channel: 0, auth: 1, apikey: 2 };
-  return S.sources.filter((s) => kinds.has(s.kind))
+  // Global per-provider aliases (oauth.model-alias) are not shown as columns; they only appear
+  // as "↳ inherited" values in account cells and still follow renames/deletes of their row.
+  return S.sources.filter((s) => s.kind !== "channel" && kinds.has(s.kind))
     .sort((a, b) => (a.provider.localeCompare(b.provider)) || (order[a.kind] - order[b.kind]) || a.label.localeCompare(b.label));
 }
 
@@ -489,7 +490,7 @@ function render() {
   table.replaceChildren();
 
   const head = h("tr", {}, h("th", { class: "alias-col" }, h("div", { class: "src-name" }, "Alias / pool"),
-    h("div", { class: "src-meta" }, `${S.rows.filter((r) => !r.deleted).length} aliases · ${srcs.length} sources`)));
+    h("div", { class: "src-meta" }, `${S.rows.filter((r) => !r.deleted).length} aliases · ${srcs.length} accounts & keys`)));
   for (const s of srcs) {
     head.append(h("th", { class: "src-head", title: s.file || s.label },
       h("div", { class: "src-name" }, s.label),
@@ -508,7 +509,7 @@ function render() {
       S.rows.length ? "No alias matches the filter." : "No aliases yet. Add one above, e.g. “opus”, then pick a model in each column.")));
   }
   for (const r of rows) {
-    const mapped = S.sources.filter((s) => !r.deleted && (S.cells.get(cellKey(s, r)) || inheritedFor(s, r))).length;
+    const mapped = S.sources.filter((s) => s.kind !== "channel" && !r.deleted && (S.cells.get(cellKey(s, r)) || inheritedFor(s, r))).length;
     const nameInput = h("input", { type: "text", class: "alias-name" + (r.origName && r.name !== r.origName ? " changed" : ""),
       value: r.name, spellcheck: "false", disabled: r.deleted,
       onchange: (ev) => {
@@ -533,9 +534,9 @@ function render() {
       const val = S.cells.get(cellKey(s, r)) || "";
       const inh = !val ? inheritedFor(s, r) : null;
       const sel = h("select", { class: "cell" + (val ? " set" : "") + (inh ? " inherited" : "") + (cellChanged(s, r) || (val && rowChanged(r) && r.origName && r.name !== r.origName) ? " changed" : ""),
-        disabled: r.deleted, title: val || (inh ? `inherits ${inh} from All ${prov(s.provider).label} accounts` : "not in this pool"),
+        disabled: r.deleted, title: val || (inh ? `inherits ${inh} from the global ${prov(s.provider).label} alias in config` : "not in this pool"),
         onchange: (ev) => { if (ev.target.value) S.cells.set(cellKey(s, r), ev.target.value); else S.cells.delete(cellKey(s, r)); render(); } },
-        h("option", { value: "" }, inh ? `↳ ${inh}` : "—"));
+        h("option", { value: "" }, inh ? `↳ ${inh} (global)` : "—"));
       const opts = new Set(s.primary);
       if (val && !opts.has(val) && !s.secondary.includes(val)) opts.add(val);
       const g1 = h("optgroup", { label: s.kind === "apikey" ? "Models of this key" : "Available on this source" });
