@@ -2,47 +2,48 @@
 
 <img src="assets/logo.svg" width="64" align="right" alt="">
 
-A [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA) plugin that adds a page to the
-management console for setting **model aliases for every subscription and API key in one place**.
+A [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA) plugin that adds a **Pools** page to the
+management console.
 
 Every source names the same model differently: Devin has `devin/claude-opus-5-5`, Claude Code
-has `claude-opus-5-5`, an API key has something else again. Give them all the alias `opus` and CPA
-treats them as one pool. Ask for `opus` and your Routing tiers (Preferred → Fallback 1 → …) pick
-which credential serves it.
+has `claude-opus-5-5`, an API key has whatever you configured. Create a pool such as `opus`, then
+drag models into it from any account or API key. Clients ask for `opus` and CPA spreads requests across
+the members, while your Routing tiers (Preferred → Fallback 1 → …) still decide the order.
 
 ```
-alias      All Claude accounts   gabriel@… (Claude)   devin-user (Devin)       claude-1 (API key)
-opus       —                     claude-opus-5-5      devin/claude-opus-5-5    claude-opus-5-5
-sonnet     claude-sonnet-5-5     ↳ inherited          devin/claude-sonnet-5-5  —
-workers    —                     —                    devin/swe-2              …
+┌ opus ───────────────────────────────┐   Models (drag onto a pool)
+│ claude-opus-5-5   Claude · gabriel@…│   ▾ Claude  gabriel@…      claude-opus-5-5 …
+│ claude-opus-5-5   Claude API · c-1  │   ▾ Devin   gabriel@…      devin/claude-opus-5-5 …
+│ devin/claude-opus-5-5  Devin · …    │   ▾ Claude API key claude-1 …
+│ + Add model…                        │
+└─────────────────────────────────────┘
 ```
 
-## What it does (and doesn't)
+## How it works
 
-- **It only writes CPA's own aliases.** There's no router, no scheduler and no request interception.
-  The plugin binary just serves the page. Disable or remove the plugin and every alias you made keeps
-  working.
-- Rows are aliases and columns are sources. Each cell is the upstream model that source maps the alias to.
-- The **auto** button fills empty cells with the newest model whose name contains the alias.
-- **keep originals** (CPA's `fork`) keeps the real model names visible next to the alias. Turn it off
-  to hide them on that account.
-- Every save shows a review of the exact changes first.
+- **Pools are CPA's own model aliases.** Adding a model to `opus` writes an alias `opus → <model>` on that
+  account or key. The plugin has no router or scheduler and doesn't touch requests. Disable it and your
+  pools keep working.
+- **Only its own pools.** The list of pool names is kept in `plugins.configs.cpa-pools-and-aliases.pools`. Aliases made
+  anywhere else (console, hand-edited config, per-account files) are never shown or changed.
+- **Name guardrails.** A pool can't use a name that is already a real model name, a global alias, or an
+  alias made elsewhere. Otherwise the two would silently merge.
+- **One model per account or key per pool.** Adding a second model from the same source replaces the first.
+- **keep original names** (CPA's `fork`, on by default) keeps the accounts' real model names working next to
+  the pool name. API keys always keep them.
+- Every save shows a review of the exact changes first. Deleting a pool removes only the aliases it created.
 
-Where each column is saved:
+Where a pool member is saved:
 
-| Column | Saved to | API used |
+| Source | Saved to | API used |
 |---|---|---|
-| **Account** (one OAuth login) | `model_aliases` in that credential's JSON file | `PATCH /v8/management/credentials/fields` |
-| **All *X* accounts** (global) | `oauth.model-alias.<provider>` in config | `PUT /v8/management/config/oauth/model-alias` |
-| **API key** | `api-keys.<provider>[group](.keys[i]).models[]` | `PUT /v8/management/config/api-keys/<provider>` |
+| Account (OAuth login) | `model_aliases` in that credential's JSON file | `PATCH /v8/management/credentials/fields` |
+| API key | `api-keys.<provider>[group](.keys[i]).models[]` | `PUT /v8/management/config/api-keys/<provider>` |
+| Pool list | `plugins.configs.cpa-pools-and-aliases.pools` | `PUT /v8/management/config/plugins/configs/cpa-pools-and-aliases/pools` |
 
-An alias set on a single account takes priority over a global alias with the same name. CPA does
-this, not the plugin. Inherited cells show as `↳ model`.
-
-> **API keys without a model list.** A key with no `models` list serves every default model of its
-> provider. Adding a list makes it serve *only* the listed models, so the first alias you add to such a
-> key also writes the provider's default models into the list. That way the key keeps serving them.
-> The review dialog warns you when this happens.
+> **API keys without a model list** serve every default model of their provider. Adding a list makes them
+> serve *only* the listed models, so the first pool member on such a key also writes the provider's default
+> models into the list. The review dialog warns you when this happens.
 
 ## Install
 

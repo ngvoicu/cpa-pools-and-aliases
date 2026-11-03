@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pools &amp; Aliases · CLIProxyAPI</title>
+<title>Pools and Aliases · CLIProxyAPI</title>
 <style>
 :root {
   --bg: #0e0e10; --panel: #151518; --panel2: #1b1b1f; --border: #2a2a30; --border2: #34343b;
   --text: #e8e8ec; --muted: #9a9aa5; --faint: #6b6b75; --accent: #3ecf8e; --accent-bg: rgba(62,207,142,.12);
-  --warn: #f5a524; --warn-bg: rgba(245,165,36,.12); --danger: #f05b5b; --danger-bg: rgba(240,91,91,.12);
-  --info: #6aa9ff; --radius: 10px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --warn: #f5a524; --warn-bg: rgba(245,165,36,.12); --danger: #f05b5b; --info: #6aa9ff;
+  --radius: 12px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: light) {
   :root { --bg:#f7f7f8; --panel:#fff; --panel2:#f2f2f4; --border:#e3e3e8; --border2:#d6d6dd; --text:#18181b;
@@ -19,103 +19,108 @@
 html, body { margin: 0; background: var(--bg); color: var(--text);
   font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; }
 button, input, select { font: inherit; color: inherit; }
-a { color: var(--info); }
-.wrap { padding: 24px 28px 120px; max-width: 100%; }
+.wrap { padding: 24px 28px 110px; }
 body.embedded header.top { padding-right: 220px; }
-header.top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+header.top { margin-bottom: 18px; }
 h1 { font-size: 26px; font-weight: 650; margin: 0 0 4px; letter-spacing: -.01em; }
-.sub { color: var(--muted); margin: 0; max-width: 760px; }
+.sub { color: var(--muted); margin: 0; max-width: 820px; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .btn { border: 1px solid var(--border2); background: var(--panel2); border-radius: 8px; padding: 7px 12px; cursor: pointer;
   display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .btn:hover { border-color: var(--faint); }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #06130d; font-weight: 600; }
-.btn.danger { color: var(--danger); }
-.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); padding: 4px 6px; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); padding: 4px 7px; }
 .btn.ghost:hover { color: var(--text); background: var(--panel2); }
-.btn.sm { padding: 4px 8px; font-size: 12px; }
-input[type=text], input[type=password], input[type=url] { background: var(--panel2); border: 1px solid var(--border2);
+.btn.danger:hover { color: var(--danger); }
+input[type=text], input[type=password], input[type=url], select.pick { background: var(--panel2); border: 1px solid var(--border2);
   border-radius: 8px; padding: 7px 10px; outline: none; min-width: 0; }
 input:focus, select:focus { border-color: var(--accent); }
-.card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
-.connect { max-width: 560px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+.connect { max-width: 560px; padding: 16px; }
 .connect label { display: block; color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
 .connect input[type=password], .connect input[type=url] { width: 100%; }
 .hint { color: var(--faint); font-size: 12px; }
-.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0 10px; flex-wrap: wrap; }
-.chip { border: 1px solid var(--border2); border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer;
-  background: transparent; color: var(--muted); }
-.chip.on { background: var(--accent-bg); border-color: var(--accent); color: var(--text); }
-.grid-wrap { overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel);
-  max-height: calc(100vh - 230px); }
-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
-th, td { border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); padding: 8px 10px; vertical-align: middle; }
-thead th { position: sticky; top: 0; background: var(--panel2); z-index: 2; text-align: left; font-weight: 500; }
-th.alias-col, td.alias-col { position: sticky; left: 0; background: var(--panel); z-index: 1; min-width: 260px; max-width: 300px; }
-thead th.alias-col { z-index: 3; background: var(--panel2); }
-tr:last-child td { border-bottom: none; }
-.src-head { min-width: 190px; max-width: 230px; }
-.src-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.src-meta { color: var(--faint); font-size: 11px; display: flex; gap: 6px; align-items: center; white-space: nowrap; }
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.note { border: 1px solid rgba(245,165,36,.35); background: var(--warn-bg); border-radius: 8px; padding: 8px 10px; font-size: 12px; margin-top: 8px; }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start; }
+@media (max-width: 1050px) { .layout { grid-template-columns: 1fr; } }
+.toolbar { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; flex-wrap: wrap; }
+.pools { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; }
+
+.pool { padding: 14px; transition: border-color .12s, background .12s; }
+.pool.drop { border-color: var(--accent); background: var(--accent-bg); }
+.pool.deleted { opacity: .45; }
+.pool-head { display: flex; align-items: center; gap: 8px; }
+.pool-name { flex: 1; font-family: var(--mono); font-size: 16px; font-weight: 650; border: 1px solid transparent; background: transparent;
+  border-radius: 6px; padding: 3px 6px; min-width: 0; }
+.pool-name:hover { border-color: var(--border2); }
+.pool-name.changed { outline: 2px solid var(--warn); outline-offset: -1px; }
+.pool.deleted .pool-name { text-decoration: line-through; }
+.pool-meta { display: flex; align-items: center; justify-content: space-between; color: var(--faint); font-size: 12px; margin: 4px 0 10px 6px; }
+.pool-meta label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+.members { display: flex; flex-direction: column; gap: 6px; min-height: 44px; }
+.member { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  border: 1px solid var(--border); background: var(--panel2); border-radius: 8px; padding: 7px 8px 7px 10px; }
+.member.new { border-color: rgba(245,165,36,.6); }
+.member .src { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.member .model { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.empty-members { border: 1px dashed var(--border2); border-radius: 8px; padding: 12px; text-align: center; color: var(--faint); font-size: 12px; }
+.removed { margin-top: 6px; font-size: 12px; color: var(--danger); font-family: var(--mono); }
+.add-row { margin-top: 10px; }
+.add-row select { width: 100%; }
+
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
 .badge { font-size: 10px; border: 1px solid var(--border2); border-radius: 4px; padding: 0 5px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
-.badge.global { color: var(--info); border-color: rgba(106,169,255,.4); }
 .badge.key { color: var(--warn); border-color: rgba(245,165,36,.4); }
-select.cell { width: 100%; min-width: 170px; background: transparent; border: 1px solid transparent; border-radius: 6px;
-  padding: 5px 6px; font-family: var(--mono); font-size: 12px; cursor: pointer; }
-select.cell:hover { border-color: var(--border2); background: var(--panel2); }
-select.cell.set { background: var(--accent-bg); border-color: rgba(62,207,142,.35); }
-select.cell.inherited { color: var(--info); }
-select.cell.changed { outline: 2px solid var(--warn); outline-offset: -1px; }
-select.cell option { background: var(--panel); color: var(--text); }
-.alias-name { font-family: var(--mono); font-weight: 600; font-size: 13px; border: 1px solid transparent; background: transparent;
-  border-radius: 6px; padding: 4px 6px; width: 100%; }
-.alias-name:hover { border-color: var(--border2); }
-.alias-name.changed { outline: 2px solid var(--warn); outline-offset: -1px; }
-.alias-tools { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 4px; color: var(--faint); font-size: 12px; }
-.alias-tools label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
-tr.deleted td { opacity: .4; }
-tr.deleted .alias-name { text-decoration: line-through; }
-.empty { padding: 40px; text-align: center; color: var(--muted); }
+
+.side { position: sticky; top: 12px; max-height: calc(100vh - 24px); display: flex; flex-direction: column; overflow: hidden; }
+.side-head { padding: 12px 12px 8px; border-bottom: 1px solid var(--border); }
+.side-head input { width: 100%; margin-top: 8px; }
+.side-body { overflow: auto; padding: 6px 8px 12px; }
+.src-group { margin-top: 8px; }
+.src-title { display: flex; align-items: center; gap: 7px; padding: 6px 4px; font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; }
+.src-title .sub2 { color: var(--faint); font-weight: 400; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-title .caret { color: var(--faint); width: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 4px 4px 21px; }
+.chip { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--border2); background: var(--panel2); border-radius: 6px;
+  padding: 3px 7px; cursor: grab; user-select: none; }
+.chip:hover { border-color: var(--accent); }
+.chip.used { opacity: .45; }
+.chip.dragging { opacity: .3; }
+
+.empty { padding: 34px; text-align: center; color: var(--muted); border: 1px dashed var(--border2); border-radius: var(--radius); }
 .pending { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--border);
   padding: 12px 28px; display: flex; align-items: center; justify-content: space-between; gap: 16px; z-index: 10;
   box-shadow: 0 -8px 24px rgba(0,0,0,.25); }
-.pending .count { font-weight: 600; }
-.changes { max-height: 40vh; overflow: auto; font-family: var(--mono); font-size: 12px; margin: 10px 0 0; padding: 0; list-style: none; }
+.changes { max-height: 42vh; overflow: auto; font-family: var(--mono); font-size: 12px; margin: 10px 0 0; padding: 0; list-style: none; }
 .changes li { padding: 3px 0; border-bottom: 1px dashed var(--border); }
 .changes .where { color: var(--faint); }
 .add { color: var(--accent); } .del { color: var(--danger); } .mod { color: var(--warn); }
-.note { border: 1px solid rgba(245,165,36,.35); background: var(--warn-bg); border-radius: 8px; padding: 8px 10px; font-size: 12px; margin-top: 8px; }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--border2); border-radius: 12px; padding: 18px; width: min(760px, 92vw); }
 dialog::backdrop { background: rgba(0,0,0,.5); }
 .toast { position: fixed; top: 16px; right: 16px; z-index: 50; display: flex; flex-direction: column; gap: 8px; }
 .toast div { background: var(--panel2); border: 1px solid var(--border2); border-left: 3px solid var(--accent); border-radius: 8px;
-  padding: 9px 12px; max-width: 420px; box-shadow: 0 6px 20px rgba(0,0,0,.3); }
+  padding: 9px 12px; max-width: 440px; box-shadow: 0 6px 20px rgba(0,0,0,.3); }
 .toast div.err { border-left-color: var(--danger); }
 .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border2); border-top-color: var(--accent);
   border-radius: 50%; animation: s .7s linear infinite; vertical-align: -2px; }
 @keyframes s { to { transform: rotate(360deg); } }
-.legend { color: var(--faint); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; }
-.legend span { display: inline-flex; gap: 6px; align-items: center; }
-.sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .hidden { display: none !important; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="top">
-    <div>
-      <h1>Pools &amp; Aliases</h1>
-      <p class="sub">One alias per row, one subscription or API key per column. Give the same alias to models from
-        different sources and CPA pools them; your Routing tiers still pick the credential. Everything is saved as CPA's
-        own aliases.</p>
-    </div>
+    <h1>Pools and Aliases</h1>
+    <p class="sub">Create a pool, then add models to it from any account or API key. Clients ask for the pool name and
+      CPA spreads requests across its members; your Routing tiers still decide the order. Pools are saved as CPA's own
+      model aliases. Aliases made anywhere else are left alone.</p>
   </header>
 
   <section id="connect" class="card connect hidden">
     <strong>Connect to the Management API</strong>
-    <p class="hint" style="margin:6px 0 0">The page uses the same <code>/v8/management</code> API as the console, with your
+    <p class="hint" style="margin:6px 0 0">This page uses the same <code>/v8/management</code> API as the console, with your
       management key. The key stays in this browser.</p>
     <div id="baseRow" class="hidden">
       <label for="base">CPA URL</label>
@@ -133,35 +138,31 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 
   <section id="app" class="hidden">
     <div class="toolbar">
-      <div class="row">
-        <input type="text" id="newAlias" placeholder="new alias, e.g. opus" style="width:220px">
-        <button class="btn" id="addAlias">+ Add alias</button>
-        <input type="text" id="filter" placeholder="filter aliases" style="width:170px">
-      </div>
-      <div class="row">
-        <span class="hint">Columns:</span>
-        <button class="chip on" data-kind="auth">Accounts</button>
-        <button class="chip on" data-kind="apikey">API keys</button>
-        <button class="btn" id="reload" title="Reload from CPA">↻ Reload</button>
-        <a class="btn ghost" id="newtab" href="#" target="_blank" rel="noopener" title="Open in a new tab">↗</a>
-        <button class="btn ghost hidden" id="logout" title="Forget the management key">Disconnect</button>
-      </div>
+      <input type="text" id="newPool" placeholder="new pool name, e.g. opus" style="width:240px" spellcheck="false">
+      <button class="btn primary" id="addPool">+ Create pool</button>
+      <span style="flex:1"></span>
+      <button class="btn" id="reload" title="Reload from CPA">↻ Reload</button>
+      <a class="btn ghost hidden" id="newtab" href="#" target="_blank" rel="noopener" title="Open in a new tab">↗</a>
+      <button class="btn ghost hidden" id="logout" title="Forget the management key">Disconnect</button>
     </div>
-    <div class="grid-wrap"><table id="grid"></table></div>
-    <div class="legend">
-      <span><i class="sw" style="background:var(--accent-bg);border:1px solid rgba(62,207,142,.5)"></i>alias set on this source</span>
-      <span><i class="sw" style="border:1px solid var(--info)"></i>↳ inherited from a global alias in config (oauth.model-alias)</span>
-      <span><i class="sw" style="outline:2px solid var(--warn)"></i>unsaved change</span>
-      <span>“keep originals” = the real model names stay visible next to the alias (fork)</span>
+    <div class="layout">
+      <div id="pools"></div>
+      <aside class="card side">
+        <div class="side-head">
+          <strong>Models</strong> <span class="hint">· drag onto a pool</span>
+          <input type="text" id="search" placeholder="search models" spellcheck="false">
+        </div>
+        <div class="side-body" id="sources"></div>
+      </aside>
     </div>
   </section>
 
-  <section id="loading" class="empty hidden"><span class="spin"></span> Loading credentials and models…</section>
+  <section id="loading" class="empty hidden"><span class="spin"></span> Loading accounts and models…</section>
 </div>
 
 <div class="pending hidden" id="pending">
-  <div><span class="count" id="pendingCount"></span> <span class="hint">unsaved</span>
-    <button class="btn ghost sm" id="showChanges">review</button></div>
+  <div><strong id="pendingCount"></strong> <span class="hint">unsaved</span>
+    <button class="btn ghost" id="showChanges">review</button></div>
   <div class="row">
     <button class="btn" id="discard">Discard</button>
     <button class="btn primary" id="save">Save to CPA</button>
@@ -185,10 +186,10 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 (() => {
 "use strict";
 
-// ---------------------------------------------------------------- constants
-const STORE_KEY = "cpa-pools-and-aliases:key";
-const STORE_BASE = "cpa-pools-and-aliases:base";
-const STORE_KINDS = "cpa-pools-and-aliases:kinds";
+const PLUGIN_ID = "cpa-pools-and-aliases";
+const STORE_KEY = PLUGIN_ID + ":key";
+const STORE_BASE = PLUGIN_ID + ":base";
+const STORE_COLLAPSED = PLUGIN_ID + ":collapsed";
 const PROVIDERS = {
   claude: { label: "Claude", color: "#d97757" },
   codex: { label: "Codex", color: "#10a37f" },
@@ -206,8 +207,10 @@ const PROVIDERS = {
 };
 const prov = (p) => PROVIDERS[p] || { label: p, color: "#888" };
 const lc = (s) => String(s || "").trim().toLowerCase();
+const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true });
 
-// ---------------------------------------------------------------- dom utils
+// ------------------------------------------------------------------ dom
 const $ = (id) => document.getElementById(id);
 function h(tag, attrs, ...children) {
   const el = document.createElement(tag);
@@ -227,11 +230,11 @@ function h(tag, attrs, ...children) {
 function toast(msg, isErr) {
   const el = h("div", { class: isErr ? "err" : "" }, msg);
   $("toast").append(el);
-  setTimeout(() => el.remove(), isErr ? 8000 : 3500);
+  setTimeout(() => el.remove(), isErr ? 9000 : 3500);
 }
 const show = (id, on) => $(id).classList.toggle("hidden", !on);
 
-// ---------------------------------------------------------------- api
+// ------------------------------------------------------------------ api
 const conn = { base: "", key: "" };
 async function api(method, path, body) {
   const res = await fetch(conn.base + "/v8/management" + path, {
@@ -241,7 +244,7 @@ async function api(method, path, body) {
   });
   const text = await res.text();
   let data = text;
-  try { data = text ? JSON.parse(text) : null; } catch (_) { /* raw text */ }
+  try { data = text ? JSON.parse(text) : null; } catch (_) { /* raw */ }
   if (!res.ok) {
     const msg = (data && typeof data === "object" && (data.error || data.message)) || text || res.statusText;
     const err = new Error(`${method} ${path}: ${res.status} ${msg}`);
@@ -250,373 +253,371 @@ async function api(method, path, body) {
   }
   return data;
 }
-const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
-// ---------------------------------------------------------------- model
-// A "source" is anything that can carry aliases:
-//   auth    — one OAuth / file credential (per-auth model_aliases in its JSON file)
-//   channel — oauth.model-alias.<provider>: applies to every account of that provider
-//   apikey  — api-keys.<provider>[group](.keys[i]).models[] entries with an alias
-// Rows are aliases. A cell is the upstream model a source maps that alias to.
-let S = null; // loaded state
+// ------------------------------------------------------------------ state
+// sources: accounts (OAuth/file credentials) and API keys. Each carries its original alias list.
+// pools:   only the names registered in plugins.configs.<id>.pools. A pool's members are the
+//          alias entries (alias === pool name) found on each source, one model per source.
+let S = null;
+let collapsed = new Set(JSON.parse(localStorage.getItem(STORE_COLLAPSED) || "[]"));
 
-function aliasEntries(list) {
-  // entries that actually define an alias (alias differs from the upstream name)
-  return (Array.isArray(list) ? list : []).filter((e) => e && e.name && e.alias && lc(e.name) !== lc(e.alias));
-}
-
-function versionKey(id) {
-  return (String(id).match(/\d+/g) || []).map(Number);
-}
-function cmpVersionDesc(a, b) {
-  const va = versionKey(a), vb = versionKey(b);
-  for (let i = 0; i < Math.max(va.length, vb.length); i++) {
-    const x = va[i] ?? -1, y = vb[i] ?? -1;
-    if (x !== y) return y - x;
-  }
-  return a.length - b.length;
-}
+const isAliasEntry = (e) => e && e.name && e.alias && lc(e.name) !== lc(e.alias);
 
 async function load() {
   show("loading", true); show("app", false);
-  const [config, creds] = await Promise.all([api("GET", "/config"), api("GET", "/credentials")]);
+  const [config, creds, pluginCfg] = await Promise.all([
+    api("GET", "/config"),
+    api("GET", "/credentials"),
+    api("GET", "/config/plugins/configs/" + PLUGIN_ID).catch(() => ({})),
+  ]);
+  const registered = (Array.isArray(pluginCfg && pluginCfg.pools) ? pluginCfg.pools : [])
+    .map((p) => (typeof p === "string" ? p : p && p.name)).filter(Boolean);
   const files = (creds && (creds.files || creds.items)) || [];
   const authFiles = files.filter((f) => f && f.name && (f.source ? f.source === "file" : /\.json$/i.test(f.name)) && !f.runtime_only);
-
-  const providersNeeded = new Set(authFiles.map((f) => lc(f.provider || f.type)));
-  const channelMap = (config.oauth && config.oauth["model-alias"]) || {};
-  Object.keys(channelMap).forEach((p) => providersNeeded.add(lc(p)));
+  const globalAliases = (config.oauth && config.oauth["model-alias"]) || {};
   const apiKeys = config["api-keys"] || {};
-  Object.keys(apiKeys).forEach((p) => providersNeeded.add(lc(p)));
 
-  // catalogs (static model definitions) per provider, best effort
   const catalogs = {};
-  await Promise.all([...providersNeeded].filter(Boolean).map(async (p) => {
+  const needCatalog = new Set();
+  for (const [p, groups] of Object.entries(apiKeys)) {
+    (Array.isArray(groups) ? groups : []).forEach((g) => {
+      const keyLists = (g.keys || []).filter((k) => Array.isArray(k.models) && k.models.length);
+      if (!(Array.isArray(g.models) && g.models.length) && !keyLists.length) needCatalog.add(lc(p));
+    });
+  }
+  await Promise.all([...needCatalog].map(async (p) => {
     try {
       const r = await api("GET", "/routing/model-definitions/" + encodeURIComponent(p));
       catalogs[p] = ((r && r.models) || []).map((m) => m.id || m.name).filter(Boolean);
     } catch (_) { catalogs[p] = []; }
   }));
 
-  // per-auth: file content (for model_aliases) + live models
-  const authData = await Promise.all(authFiles.map(async (f) => {
+  const sources = [];
+  await Promise.all(authFiles.map(async (f) => {
     const [content, models] = await Promise.allSettled([
       api("GET", "/credentials/download?name=" + encodeURIComponent(f.name)),
       api("GET", "/credentials/models?name=" + encodeURIComponent(f.name)),
     ]);
     let json = content.status === "fulfilled" ? content.value : null;
     if (typeof json === "string") { try { json = JSON.parse(json); } catch (_) { json = null; } }
-    return {
-      file: f,
-      aliases: (json && (json.model_aliases || json["model-aliases"])) || [],
-      readable: !!json,
+    const p = lc(f.provider || f.type);
+    sources.push({
+      id: "auth:" + f.name, kind: "auth", provider: p, file: f.name,
+      label: f.email || f.label || f.account || f.name.replace(/\.json$/i, ""),
+      disabled: !!f.disabled,
+      entries: clone((json && (json.model_aliases || json["model-aliases"])) || []),
       live: models.status === "fulfilled" ? ((models.value && models.value.models) || []).map((m) => m.id).filter(Boolean) : [],
-    };
+      globals: clone(globalAliases[p] || globalAliases[Object.keys(globalAliases).find((k) => lc(k) === p)] || []),
+    });
   }));
-
-  const sources = [];
-  // global channel columns: providers with OAuth accounts or existing global aliases
-  const channelProviders = new Set([...authFiles.map((f) => lc(f.provider || f.type)), ...Object.keys(channelMap).map(lc)]);
-  for (const p of [...channelProviders].sort()) {
-    if (!p) continue;
-    const entries = clone(channelMap[p] || channelMap[Object.keys(channelMap).find((k) => lc(k) === p)] || []);
-    sources.push({ id: "channel:" + p, kind: "channel", provider: p, label: "All " + prov(p).label + " accounts",
-      meta: "global · oauth.model-alias", entries, channelKey: Object.keys(channelMap).find((k) => lc(k) === p) || p });
-  }
-  for (const a of authData) {
-    const p = lc(a.file.provider || a.file.type);
-    sources.push({ id: "auth:" + a.file.name, kind: "auth", provider: p,
-      label: a.file.email || a.file.label || a.file.account || a.file.name.replace(/\.json$/i, ""),
-      meta: a.file.disabled ? "disabled" : (a.file.account_type || ""), file: a.file.name,
-      entries: clone(Array.isArray(a.aliases) ? a.aliases : []), live: a.live, readable: a.readable });
-  }
   for (const [p0, groups] of Object.entries(apiKeys)) {
     if (!Array.isArray(groups)) continue;
     const p = lc(p0);
     groups.forEach((g, gi) => {
       if (!g || typeof g !== "object") return;
       const keys = Array.isArray(g.keys) ? g.keys : [];
+      const name = g.name || `${p}-${gi + 1}`;
       const keyLevel = keys.map((k, ki) => ({ k, ki })).filter(({ k }) => k && Array.isArray(k.models));
-      const groupName = g.name || `${p}-${gi + 1}`;
       if (Array.isArray(g.models) || keyLevel.length === 0) {
         sources.push({ id: `apikey:${p0}:${gi}`, kind: "apikey", provider: p, providerKey: p0, gi, ki: null,
-          label: groupName, meta: keys.length > 1 ? `${keys.length} keys` : "", entries: clone(g.models || []),
-          hadList: Array.isArray(g.models) && g.models.length > 0 });
+          label: name, entries: clone(g.models || []), hadList: Array.isArray(g.models) && g.models.length > 0 });
       }
       for (const { k, ki } of keyLevel) {
-        const tail = typeof k["api-key"] === "string" && k["api-key"].length > 8 ? "…" + k["api-key"].slice(-4) : "";
         sources.push({ id: `apikey:${p0}:${gi}:${ki}`, kind: "apikey", provider: p, providerKey: p0, gi, ki,
-          label: groupName + (keys.length > 1 ? ` · key ${ki + 1}` : ""), meta: tail, entries: clone(k.models || []),
-          hadList: k.models.length > 0 });
+          label: name + (keys.length > 1 ? ` · key ${ki + 1}` : ""), entries: clone(k.models || []), hadList: k.models.length > 0 });
       }
     });
   }
+  const order = { auth: 0, apikey: 1 };
+  sources.sort((a, b) => byName(a.provider, b.provider) || order[a.kind] - order[b.kind] || byName(a.label, b.label));
 
-  // model options per source
-  for (const s of sources) {
-    const own = aliasEntries(s.entries);
-    const aliasIds = new Set(own.map((e) => lc(e.alias)));
-    const names = new Set((Array.isArray(s.entries) ? s.entries : []).map((e) => e && e.name).filter(Boolean));
-    let primary = new Set(), secondary = new Set(catalogs[s.provider] || []);
-    if (s.kind === "auth") {
-      const ch = sources.find((x) => x.id === "channel:" + s.provider);
-      aliasEntries(ch && ch.entries).forEach((e) => aliasIds.add(lc(e.alias)));
-      s.live.forEach((m) => { if (!aliasIds.has(lc(m))) primary.add(m); });
-      names.forEach((n) => primary.add(n));
-    } else if (s.kind === "channel") {
-      sources.filter((x) => x.kind === "auth" && x.provider === s.provider)
-        .forEach((x) => x.live.forEach((m) => primary.add(m)));
-      aliasEntries(s.entries).forEach((e) => primary.delete(e.alias));
-      sources.filter((x) => x.kind === "auth" && x.provider === s.provider)
-        .forEach((x) => aliasEntries(x.entries).forEach((e) => primary.delete(e.alias)));
-      names.forEach((n) => primary.add(n));
-    } else {
-      names.forEach((n) => primary.add(n));
-      if (!s.hadList) secondary.forEach((n) => primary.add(n));
-    }
-    secondary = [...secondary].filter((m) => !primary.has(m) && !aliasIds.has(lc(m)));
-    s.primary = [...primary].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-    s.secondary = secondary.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-    s.catalog = catalogs[s.provider] || [];
-  }
+  const poolNames = new Set(registered.map(lc));
+  for (const s of sources) s.options = optionsFor(s, poolNames, catalogs);
 
-  // rows: every alias found anywhere
-  const rowMap = new Map();
-  for (const s of sources) {
-    for (const e of aliasEntries(s.entries)) {
-      const k = lc(e.alias);
-      if (!rowMap.has(k)) rowMap.set(k, { id: "r" + rowMap.size, name: e.alias, origName: e.alias, fork: false, origFork: false, deleted: false });
-      if (e.fork === true && s.kind !== "apikey") { rowMap.get(k).fork = true; rowMap.get(k).origFork = true; }
-    }
-  }
-  const rows = [...rowMap.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-
-  // cells: desired + original mapping
-  const orig = new Map(), cells = new Map();
-  for (const s of sources) {
-    for (const e of aliasEntries(s.entries)) {
-      const row = rowMap.get(lc(e.alias));
-      const key = s.id + "\u0000" + row.id;
-      if (!orig.has(key)) { orig.set(key, e.name); cells.set(key, e.name); }
-    }
-  }
-
-  S = { config, sources, rows, orig, cells, catalogs, nextRow: rows.length };
+  const pools = registered.map((name, i) => readPool(name, "p" + i, sources));
+  S = { config, pluginCfg: pluginCfg || {}, sources, pools, nextId: pools.length, catalogs, registered };
   show("loading", false); show("app", true);
   render();
 }
 
-// ---------------------------------------------------------------- derived
-const cellKey = (s, r) => s.id + "\u0000" + r.id;
-function inheritedFor(s, r) {
-  if (s.kind !== "auth") return null;
-  const ch = S.sources.find((x) => x.id === "channel:" + s.provider);
-  return ch ? S.cells.get(cellKey(ch, r)) || null : null;
-}
-function rowChanged(r) {
-  return r.deleted || !r.origName || r.name !== r.origName || r.fork !== r.origFork;
-}
-function cellChanged(s, r) {
-  const a = S.orig.get(cellKey(s, r)) || null;
-  const b = r.deleted ? null : S.cells.get(cellKey(s, r)) || null;
-  return a !== b;
+// Models a source can contribute. `name` is the upstream model id written into the alias entry;
+// `label` is what the source currently shows clients when that differs.
+function optionsFor(s, poolNames, catalogs) {
+  const out = new Map();
+  const add = (name, label) => { if (name && !out.has(lc(name))) out.set(lc(name), { name, label: label || name }); };
+  if (s.kind === "auth") {
+    const reverse = new Map();
+    for (const e of [...s.globals, ...s.entries]) if (isAliasEntry(e)) reverse.set(lc(e.alias), e.name);
+    for (const id of s.live) {
+      if (poolNames.has(lc(id))) continue;
+      const upstream = reverse.get(lc(id));
+      if (upstream) add(upstream, `${upstream}  (shown as ${id})`);
+      else add(id);
+    }
+  } else {
+    for (const e of s.entries) {
+      if (!e || !e.name || poolNames.has(lc(e.alias))) continue;
+      add(e.name, e["display-name"] && e["display-name"] !== e.name ? `${e.name}  · ${e["display-name"]}` : e.name);
+    }
+    if (!s.hadList) for (const m of catalogs[s.provider] || []) add(m);
+  }
+  return [...out.values()].sort((a, b) => byName(a.name, b.name));
 }
 
-// Compute the list of human-readable changes + the write plan.
+function readPool(name, id, sources) {
+  const members = new Map();
+  let fork = null;
+  for (const s of sources) {
+    const e = s.entries.find((x) => isAliasEntry(x) && lc(x.alias) === lc(name));
+    if (!e) continue;
+    members.set(s.id, e.name);
+    if (s.kind === "auth") fork = fork || e.fork === true;
+  }
+  return { id, name, origName: name, fork: fork !== false, origFork: fork !== false,
+    members, origMembers: new Map(members), deleted: false, isNew: false };
+}
+
+const srcById = (id) => S.sources.find((s) => s.id === id);
+const srcLabel = (s) => `${prov(s.provider).label}${s.kind === "apikey" ? " API key" : ""} · ${s.label}`;
+
+// ------------------------------------------------------------------ diff / plan
 function plan() {
   const changes = [], notes = [];
-  const touched = new Map(); // source id -> new entries
+  const managed = new Set(S.pools.flatMap((p) => [lc(p.name), lc(p.origName)]).filter(Boolean));
+  const touched = new Map();
   for (const s of S.sources) {
-    let entries = clone(Array.isArray(s.entries) ? s.entries : []);
+    const before = new Map(), after = new Map();
+    for (const p of S.pools) {
+      if (p.origName && p.origMembers.has(s.id)) before.set(lc(p.origName), { pool: p, model: p.origMembers.get(s.id) });
+      if (!p.deleted && p.members.has(s.id)) after.set(lc(p.name), { pool: p, model: p.members.get(s.id) });
+    }
     let dirty = false;
-    for (const r of S.rows) {
-      const before = S.orig.get(cellKey(s, r)) || null;
-      const after = r.deleted ? null : S.cells.get(cellKey(s, r)) || null;
-      const renamed = r.origName && r.name !== r.origName;
-      const forkChanged = r.fork !== r.origFork && s.kind !== "apikey";
-      if (before === after && !(after && renamed) && !(after && forkChanged)) continue;
-      if (!before && !after) continue;
-      // remove existing entries for the original alias name, keep their extra fields
-      const oldName = lc(r.origName || r.name);
-      let template = {};
-      entries = entries.filter((e) => {
-        if (e && lc(e.alias) === oldName && lc(e.name) !== lc(e.alias)) { template = e; return false; }
-        return true;
-      });
-      if (after) {
-        const entry = { ...template, name: after, alias: r.name };
-        if (s.kind !== "apikey") { if (r.fork) entry.fork = true; else delete entry.fork; }
-        entries.push(entry);
-      }
+    const where = srcLabel(s);
+    for (const p of S.pools) {
+      const b = p.origName ? p.origMembers.get(s.id) : undefined;
+      const a = p.deleted ? undefined : p.members.get(s.id);
+      const renamed = !!p.origName && p.origName !== p.name;
+      const forkChanged = s.kind === "auth" && p.fork !== p.origFork;
+      if (!b && !a) continue;
+      if (b === a && !renamed && !forkChanged) continue;
       dirty = true;
-      const where = s.label + " · " + prov(s.provider).label + (s.kind === "channel" ? "" : s.kind === "apikey" ? " API key" : "");
-      if (!before) changes.push({ t: "add", text: `+ ${r.name} → ${after}`, where });
-      else if (!after) changes.push({ t: "del", text: `− ${r.origName || r.name} (${before})`, where });
-      else if (before !== after || renamed) changes.push({ t: "mod", text: `~ ${r.origName}${renamed ? " ⇒ " + r.name : ""}: ${before}${before !== after ? " → " + after : ""}`, where });
-      else changes.push({ t: "mod", text: `~ ${r.name}: keep originals ${r.fork ? "on" : "off"}`, where });
+      if (!b) changes.push({ t: "add", text: `+ ${p.name} ← ${a}`, where });
+      else if (!a) changes.push({ t: "del", text: `− ${p.origName} ← ${b}`, where });
+      else if (b !== a || renamed) changes.push({ t: "mod", text: `~ ${p.origName}${renamed ? " ⇒ " + p.name : ""}: ${b}${b !== a ? " → " + a : ""}`, where });
+      else changes.push({ t: "mod", text: `~ ${p.name}: keep original names ${p.fork ? "on" : "off"}`, where });
     }
     if (!dirty) continue;
-    if (s.kind === "apikey" && !s.hadList) {
-      const added = aliasEntries(entries).length > 0;
-      if (added && s.catalog.length) {
-        const seed = s.catalog.filter((m) => !entries.some((e) => lc(e.name) === lc(m) && lc(e.alias || e.name) === lc(m)))
-          .map((m) => ({ name: m, alias: m }));
-        entries = [...seed, ...entries];
-        notes.push(`${s.label}: this key had no model list, so it served every default ${prov(s.provider).label} model. ` +
-          `Its ${seed.length} default models are written explicitly so it keeps serving them next to the alias.`);
-      } else if (added) {
-        notes.push(`${s.label}: this key had no model list. After saving it will only serve the aliased models.`);
-      }
+    // rebuild: drop every alias entry that belongs to a managed pool name, then add current members
+    const templates = new Map();
+    let entries = (Array.isArray(s.entries) ? s.entries : []).filter((e) => {
+      if (isAliasEntry(e) && managed.has(lc(e.alias))) { templates.set(lc(e.alias), e); return false; }
+      return true;
+    });
+    for (const [, { pool, model }] of after) {
+      const tpl = (pool.origName && templates.get(lc(pool.origName))) || {};
+      const entry = { ...tpl, name: model, alias: pool.name };
+      if (s.kind === "auth") { if (pool.fork) entry.fork = true; else delete entry.fork; }
+      entries.push(entry);
+    }
+    if (s.kind === "apikey" && !s.hadList && after.size) {
+      const seed = (S.catalogs[s.provider] || []).filter((m) => !entries.some((e) => lc(e.name) === lc(m) && lc(e.alias || e.name) === lc(m)))
+        .map((m) => ({ name: m, alias: m }));
+      entries = [...seed, ...entries];
+      notes.push(`${s.label}: this key had no model list, so it served every default ${prov(s.provider).label} model. ` +
+        `${seed.length ? `Its ${seed.length} default models are written explicitly so it keeps serving them.` : "After saving it will only serve the pooled models."}`);
     }
     touched.set(s.id, entries);
   }
-  return { changes, notes, touched };
-}
-
-// ---------------------------------------------------------------- render
-let kinds = new Set(JSON.parse(localStorage.getItem(STORE_KINDS) || '["auth","channel","apikey"]'));
-function visibleSources() {
-  const order = { channel: 0, auth: 1, apikey: 2 };
-  // Global per-provider aliases (oauth.model-alias) are not shown as columns; they only appear
-  // as "↳ inherited" values in account cells and still follow renames/deletes of their row.
-  return S.sources.filter((s) => s.kind !== "channel" && kinds.has(s.kind))
-    .sort((a, b) => (a.provider.localeCompare(b.provider)) || (order[a.kind] - order[b.kind]) || a.label.localeCompare(b.label));
-}
-
-function render() {
-  const srcs = visibleSources();
-  const filter = lc($("filter").value);
-  const table = $("grid");
-  table.replaceChildren();
-
-  const head = h("tr", {}, h("th", { class: "alias-col" }, h("div", { class: "src-name" }, "Alias / pool"),
-    h("div", { class: "src-meta" }, `${S.rows.filter((r) => !r.deleted).length} aliases · ${srcs.length} accounts & keys`)));
-  for (const s of srcs) {
-    head.append(h("th", { class: "src-head", title: s.file || s.label },
-      h("div", { class: "src-name" }, s.label),
-      h("div", { class: "src-meta" }, h("i", { class: "dot", style: `background:${prov(s.provider).color}` }), prov(s.provider).label,
-        s.kind === "channel" ? h("span", { class: "badge global" }, "global") : null,
-        s.kind === "apikey" ? h("span", { class: "badge key" }, "api key") : null,
-        s.kind === "auth" ? h("span", { class: "badge" }, "account") : null,
-        s.meta ? h("span", {}, s.meta) : null)));
-  }
-  table.append(h("thead", {}, head));
-
-  const body = h("tbody");
-  const rows = S.rows.filter((r) => !filter || lc(r.name).includes(filter) || lc(r.origName).includes(filter));
-  if (!rows.length) {
-    body.append(h("tr", {}, h("td", { class: "alias-col empty", colspan: srcs.length + 1 },
-      S.rows.length ? "No alias matches the filter." : "No aliases yet. Add one above, e.g. “opus”, then pick a model in each column.")));
-  }
-  for (const r of rows) {
-    const mapped = S.sources.filter((s) => s.kind !== "channel" && !r.deleted && (S.cells.get(cellKey(s, r)) || inheritedFor(s, r))).length;
-    const nameInput = h("input", { type: "text", class: "alias-name" + (r.origName && r.name !== r.origName ? " changed" : ""),
-      value: r.name, spellcheck: "false", disabled: r.deleted,
-      onchange: (ev) => {
-        const v = ev.target.value.trim();
-        if (!v) { ev.target.value = r.name; return; }
-        if (S.rows.some((o) => o !== r && !o.deleted && lc(o.name) === lc(v))) { toast(`Alias “${v}” already exists`, true); ev.target.value = r.name; return; }
-        r.name = v; render();
-      } });
-    const tools = h("div", { class: "alias-tools" },
-      h("span", {}, `${mapped} source${mapped === 1 ? "" : "s"}`),
-      h("span", { class: "row", style: "gap:4px" },
-        h("label", { title: "Keep the real model names visible next to the alias (fork). Applies to accounts and global aliases." },
-          h("input", { type: "checkbox", checked: r.fork, disabled: r.deleted, onchange: (ev) => { r.fork = ev.target.checked; render(); } }), "keep originals"),
-        h("button", { class: "btn ghost sm", title: "Fill empty cells with the newest model whose name contains the alias", disabled: r.deleted,
-          onclick: () => autofill(r) }, "auto"),
-        r.deleted
-          ? h("button", { class: "btn ghost sm", onclick: () => { r.deleted = false; render(); } }, "undo")
-          : h("button", { class: "btn ghost sm danger", title: "Remove this alias from every source",
-              onclick: () => { if (!r.origName) S.rows.splice(S.rows.indexOf(r), 1); else r.deleted = true; render(); } }, "✕")));
-    const tr = h("tr", { class: r.deleted ? "deleted" : "" }, h("td", { class: "alias-col" }, nameInput, tools));
-    for (const s of srcs) {
-      const val = S.cells.get(cellKey(s, r)) || "";
-      const inh = !val ? inheritedFor(s, r) : null;
-      const sel = h("select", { class: "cell" + (val ? " set" : "") + (inh ? " inherited" : "") + (cellChanged(s, r) || (val && rowChanged(r) && r.origName && r.name !== r.origName) ? " changed" : ""),
-        disabled: r.deleted, title: val || (inh ? `inherits ${inh} from the global ${prov(s.provider).label} alias in config` : "not in this pool"),
-        onchange: (ev) => { if (ev.target.value) S.cells.set(cellKey(s, r), ev.target.value); else S.cells.delete(cellKey(s, r)); render(); } },
-        h("option", { value: "" }, inh ? `↳ ${inh} (global)` : "—"));
-      const opts = new Set(s.primary);
-      if (val && !opts.has(val) && !s.secondary.includes(val)) opts.add(val);
-      const g1 = h("optgroup", { label: s.kind === "apikey" ? "Models of this key" : "Available on this source" });
-      [...opts].forEach((m) => g1.append(h("option", { value: m }, m)));
-      sel.append(g1);
-      if (s.secondary.length) {
-        const g2 = h("optgroup", { label: s.kind === "apikey" ? "Other " + prov(s.provider).label + " models" : "Catalog (may be excluded)" });
-        s.secondary.forEach((m) => g2.append(h("option", { value: m }, m)));
-        sel.append(g2);
-      }
-      sel.value = val;
-      tr.append(h("td", {}, sel));
+  const names = S.pools.filter((p) => !p.deleted).map((p) => p.name);
+  const registryChanged = JSON.stringify(names) !== JSON.stringify(S.registered);
+  if (registryChanged && !changes.length) {
+    for (const p of S.pools) {
+      if (p.isNew && !p.deleted) changes.push({ t: "add", text: `+ pool ${p.name} (empty)`, where: "" });
+      if (!p.isNew && p.deleted) changes.push({ t: "del", text: `− pool ${p.origName}`, where: "" });
     }
-    body.append(tr);
+    if (!changes.length) changes.push({ t: "mod", text: "~ pool list", where: "" });
   }
-  table.append(body);
-  updatePending();
+  return { changes, notes, touched, names, registryChanged };
 }
 
-function updatePending() {
+// ------------------------------------------------------------------ render
+function render() {
+  renderPools();
+  renderSources();
   const { changes } = plan();
   $("pendingCount").textContent = changes.length + " change" + (changes.length === 1 ? "" : "s");
   show("pending", changes.length > 0);
 }
 
-function autofill(r) {
-  const tokens = lc(r.name).split(/[^a-z0-9.]+/).filter(Boolean);
-  if (!tokens.length) return;
-  let n = 0;
-  for (const s of visibleSources()) {
-    if (s.kind === "channel" || S.cells.get(cellKey(s, r))) continue;
-    if (inheritedFor(s, r)) continue;
-    const hits = s.primary.filter((m) => tokens.every((t) => lc(m).includes(t)));
-    if (!hits.length) continue;
-    S.cells.set(cellKey(s, r), hits.sort(cmpVersionDesc)[0]); n++;
+function renderPools() {
+  const box = $("pools");
+  box.replaceChildren();
+  if (!S.pools.length) {
+    box.append(h("div", { class: "empty" }, "No pools yet. Create one above (for example ", h("code", {}, "opus"),
+      "), then drag models into it from the list on the right."));
+    return;
   }
-  toast(n ? `Filled ${n} cell${n === 1 ? "" : "s"} for “${r.name}” — review before saving` : `No model names contain “${r.name}”`, !n);
+  const grid = h("div", { class: "pools" });
+  for (const p of S.pools) grid.append(poolCard(p));
+  box.append(grid);
+}
+
+function poolCard(p) {
+  const card = h("div", { class: "card pool" + (p.deleted ? " deleted" : "") });
+  if (!p.deleted) {
+    card.addEventListener("dragover", (e) => { e.preventDefault(); card.classList.add("drop"); });
+    card.addEventListener("dragleave", (e) => { if (!card.contains(e.relatedTarget)) card.classList.remove("drop"); });
+    card.addEventListener("drop", (e) => {
+      e.preventDefault(); card.classList.remove("drop");
+      try { const d = JSON.parse(e.dataTransfer.getData("text/plain")); addMember(p, d.source, d.model); } catch (_) { /* ignore */ }
+    });
+  }
+  const name = h("input", { type: "text", class: "pool-name" + (p.origName && p.name !== p.origName ? " changed" : ""),
+    value: p.name, spellcheck: "false", disabled: p.deleted,
+    onchange: (ev) => {
+      const v = ev.target.value.trim();
+      const err = v === p.name ? null : nameProblem(v, p);
+      if (!v || err) { if (err) toast(err, true); ev.target.value = p.name; return; }
+      p.name = v; render();
+    } });
+  const del = p.deleted
+    ? h("button", { class: "btn ghost", onclick: () => { p.deleted = false; render(); } }, "undo")
+    : h("button", { class: "btn ghost danger", title: "Delete this pool (removes only the aliases it created)",
+        onclick: () => { if (p.isNew) S.pools.splice(S.pools.indexOf(p), 1); else p.deleted = true; render(); } }, "✕");
+  card.append(h("div", { class: "pool-head" }, name, del));
+  card.append(h("div", { class: "pool-meta" },
+    h("span", {}, `${p.members.size} model${p.members.size === 1 ? "" : "s"}`),
+    h("label", { title: "Accounts keep showing their real model names next to the pool name (CPA's fork option). API keys always keep them." },
+      h("input", { type: "checkbox", checked: p.fork, disabled: p.deleted, onchange: (ev) => { p.fork = ev.target.checked; render(); } }),
+      "keep original names")));
+
+  const list = h("div", { class: "members" });
+  if (!p.members.size) list.append(h("div", { class: "empty-members" }, "Drop models here, or add one below"));
+  for (const [sid, model] of p.members) {
+    const s = srcById(sid);
+    if (!s) continue;
+    const isNew = p.origMembers.get(sid) !== model || (p.origName && p.name !== p.origName);
+    list.append(h("div", { class: "member" + (isNew ? " new" : ""), title: srcLabel(s) },
+      h("i", { class: "dot", style: `background:${prov(s.provider).color}` }),
+      h("div", { style: "min-width:0" },
+        h("div", { class: "model" }, model),
+        h("div", { class: "src" }, srcLabel(s), s.disabled ? " (disabled)" : "")),
+      h("button", { class: "btn ghost danger", title: "Remove from pool", disabled: p.deleted,
+        onclick: () => { p.members.delete(sid); render(); } }, "✕")));
+  }
+  card.append(list);
+  const removed = [...p.origMembers.keys()].filter((sid) => !p.members.has(sid)).map(srcById).filter(Boolean);
+  if (removed.length && !p.deleted) card.append(h("div", { class: "removed" }, "removed: " + removed.map((s) => s.label).join(", ")));
+
+  if (!p.deleted) {
+    const sel = h("select", { class: "pick", onchange: (ev) => {
+      const [sid, model] = JSON.parse(ev.target.value || "null") || [];
+      if (sid) addMember(p, sid, model);
+    } }, h("option", { value: "" }, "+ Add model…"));
+    for (const s of S.sources) {
+      if (!s.options.length) continue;
+      const g = h("optgroup", { label: srcLabel(s) + (p.members.has(s.id) ? "  (replaces current)" : "") });
+      s.options.forEach((o) => g.append(h("option", { value: JSON.stringify([s.id, o.name]) }, o.label)));
+      sel.append(g);
+    }
+    card.append(h("div", { class: "add-row" }, sel));
+  }
+  return card;
+}
+
+function renderSources() {
+  const q = lc($("search").value);
+  const body = $("sources");
+  body.replaceChildren();
+  for (const s of S.sources) {
+    const opts = s.options.filter((o) => !q || lc(o.label).includes(q) || lc(s.label).includes(q) || lc(s.provider).includes(q));
+    if (!opts.length) continue;
+    const open = q || !collapsed.has(s.id);
+    const used = new Set(S.pools.filter((p) => !p.deleted && p.members.has(s.id)).map((p) => lc(p.members.get(s.id))));
+    const title = h("div", { class: "src-title", onclick: () => {
+      collapsed.has(s.id) ? collapsed.delete(s.id) : collapsed.add(s.id);
+      localStorage.setItem(STORE_COLLAPSED, JSON.stringify([...collapsed])); renderSources();
+    } },
+      h("span", { class: "caret" }, open ? "▾" : "▸"),
+      h("i", { class: "dot", style: `background:${prov(s.provider).color}` }),
+      h("span", {}, prov(s.provider).label),
+      s.kind === "apikey" ? h("span", { class: "badge key" }, "api key") : null,
+      h("span", { class: "sub2" }, s.label),
+      h("span", { class: "hint", style: "margin-left:auto" }, String(opts.length)));
+    const group = h("div", { class: "src-group" }, title);
+    if (open) {
+      const chips = h("div", { class: "chips" });
+      for (const o of opts) {
+        const chip = h("span", { class: "chip" + (used.has(lc(o.name)) ? " used" : ""), draggable: "true", title: o.label },
+          o.label.split("  ")[0]);
+        chip.addEventListener("dragstart", (e) => {
+          e.dataTransfer.setData("text/plain", JSON.stringify({ source: s.id, model: o.name }));
+          e.dataTransfer.effectAllowed = "copy";
+          chip.classList.add("dragging");
+        });
+        chip.addEventListener("dragend", () => chip.classList.remove("dragging"));
+        chips.append(chip);
+      }
+      group.append(chips);
+    }
+    body.append(group);
+  }
+  if (!body.children.length) body.append(h("div", { class: "hint", style: "padding:12px" }, q ? "No models match." : "No accounts or API keys found."));
+}
+
+function addMember(p, sid, model) {
+  const s = srcById(sid);
+  if (!s || !model) return;
+  const prev = p.members.get(sid);
+  if (prev === model) return;
+  p.members.set(sid, model);
+  if (prev) toast(`${srcLabel(s)}: replaced ${prev} with ${model}. A pool takes one model per account or key.`);
   render();
 }
 
-function addAlias() {
-  const v = $("newAlias").value.trim();
-  if (!v) return;
-  if (/\s/.test(v)) { toast("Aliases cannot contain spaces", true); return; }
-  if (S.rows.some((r) => !r.deleted && lc(r.name) === lc(v))) { toast(`Alias “${v}” already exists`, true); return; }
-  S.rows.unshift({ id: "r" + (S.nextRow++), name: v, origName: null, fork: true, origFork: true, deleted: false });
-  $("newAlias").value = "";
+// ------------------------------------------------------------------ pool names
+function nameProblem(v, self) {
+  if (!v) return "Pool name is required";
+  if (/\s/.test(v)) return "Pool names cannot contain spaces";
+  if (S.pools.some((p) => p !== self && !p.deleted && lc(p.name) === lc(v))) return `A pool named “${v}” already exists`;
+  const native = S.sources.filter((s) => s.options.some((o) => lc(o.name) === lc(v)) || (s.kind === "auth" && s.live.some((m) => lc(m) === lc(v))));
+  const foreign = S.sources.filter((s) => (s.entries || []).some((e) => isAliasEntry(e) && lc(e.alias) === lc(v)) && !(self && self.origName && lc(self.origName) === lc(v)));
+  const global = S.sources.filter((s) => s.kind === "auth" && s.globals.some((e) => isAliasEntry(e) && lc(e.alias) === lc(v)));
+  if (global.length) return `“${v}” is already a global alias in config (oauth.model-alias). Pick another name.`;
+  if (foreign.length) return `“${v}” is already an alias on ${foreign.map((s) => s.label).join(", ")}, made outside this page. Pick another name.`;
+  if (native.length) return `“${v}” is already a real model name on ${native.length} source${native.length === 1 ? "" : "s"}; ` +
+    "a pool with this name would silently merge with them. Pick another name.";
+  return null;
+}
+
+function addPool() {
+  const v = $("newPool").value.trim();
+  const err = nameProblem(v, null);
+  if (err) { toast(err, true); return; }
+  S.pools.push({ id: "p" + (S.nextId++), name: v, origName: null, fork: true, origFork: true,
+    members: new Map(), origMembers: new Map(), deleted: false, isNew: true });
+  $("newPool").value = "";
   render();
 }
 
-// ---------------------------------------------------------------- save
+// ------------------------------------------------------------------ save
 function openReview() {
   const { changes, notes } = plan();
-  $("changeList").replaceChildren(...changes.map((c) => h("li", {}, h("span", { class: c.t }, c.text), "  ", h("span", { class: "where" }, c.where))));
+  $("changeList").replaceChildren(...changes.map((c) => h("li", {}, h("span", { class: c.t }, c.text), c.where ? "   " : "", h("span", { class: "where" }, c.where))));
   $("reviewNotes").replaceChildren(...notes.map((n) => h("div", { class: "note" }, n)));
   $("review").showModal();
 }
 
 async function save() {
-  const { touched } = plan();
+  const { touched, names, registryChanged } = plan();
   const btn = $("confirmSave");
   btn.disabled = true; btn.replaceChildren(h("span", { class: "spin" }), " Saving…");
   const errors = [];
   try {
-    // 1) per-account aliases
     for (const s of S.sources.filter((x) => x.kind === "auth" && touched.has(x.id))) {
       try { await api("PATCH", "/credentials/fields", { name: s.file, model_aliases: touched.get(s.id) }); }
       catch (e) { errors.push(e.message); }
     }
-    // 2) global per-provider aliases (one write for the whole map)
-    const chSources = S.sources.filter((x) => x.kind === "channel" && touched.has(x.id));
-    if (chSources.length) {
-      const map = clone((S.config.oauth && S.config.oauth["model-alias"]) || {});
-      for (const s of chSources) {
-        const list = touched.get(s.id);
-        if (list.length) map[s.channelKey] = list; else delete map[s.channelKey];
-      }
-      try { await api("PUT", "/config/oauth/model-alias", map); } catch (e) { errors.push(e.message); }
-    }
-    // 3) API keys, one write per provider
     const byProvider = new Map();
     for (const s of S.sources.filter((x) => x.kind === "apikey" && touched.has(x.id))) {
       if (!byProvider.has(s.providerKey)) byProvider.set(s.providerKey, []);
@@ -625,29 +626,31 @@ async function save() {
     for (const [p, list] of byProvider) {
       const groups = clone(S.config["api-keys"][p]);
       for (const s of list) {
-        const entries = touched.get(s.id);
-        if (s.ki == null) groups[s.gi].models = entries;
-        else groups[s.gi].keys[s.ki].models = entries;
+        if (s.ki == null) groups[s.gi].models = touched.get(s.id);
+        else groups[s.gi].keys[s.ki].models = touched.get(s.id);
       }
       try { await api("PUT", "/config/api-keys/" + encodeURIComponent(p), groups); } catch (e) { errors.push(e.message); }
+    }
+    // pool list last, so a failed alias write never leaves pools CPA doesn't know about
+    if (registryChanged && errors.length === 0) {
+      try { await api("PUT", `/config/plugins/configs/${PLUGIN_ID}/pools`, names); } catch (e) { errors.push(e.message); }
     }
   } finally {
     btn.disabled = false; btn.textContent = "Save";
   }
   $("review").close();
   if (errors.length) errors.forEach((m) => toast(m, true));
-  else toast("Saved. CPA reloads aliases automatically.");
-  // CPA re-reads credential files through its watcher; give it a moment before reloading.
+  else toast("Saved. CPA picks up the aliases automatically.");
   setTimeout(() => load().catch((e) => toast(e.message, true)), 900);
 }
 
-// ---------------------------------------------------------------- boot
+// ------------------------------------------------------------------ boot
 function initConnect() {
   const httpOrigin = /^https?:$/.test(location.protocol);
   conn.base = httpOrigin ? location.origin : (localStorage.getItem(STORE_BASE) || "http://127.0.0.1:8317");
   if (!httpOrigin) { show("baseRow", true); $("base").value = conn.base; }
   $("newtab").href = location.href;
-  if (window.top === window) $("newtab").classList.add("hidden"); else document.body.classList.add("embedded");
+  if (window.top !== window) { document.body.classList.add("embedded"); show("newtab", true); }
   const saved = localStorage.getItem(STORE_KEY) || sessionStorage.getItem(STORE_KEY);
   if (saved) { conn.key = saved; return connect(true); }
   const shared = httpOrigin ? consoleKey() : null;
@@ -655,8 +658,7 @@ function initConnect() {
   show("connect", true);
 }
 
-// When the console ("Remember password" on) stored its key on this origin, reuse it so the
-// page opens without asking again. Best effort: falls back to the key prompt on any mismatch.
+// Reuse the console's key when it was stored with "Remember password" on this origin.
 function consoleKey() {
   try {
     const raw = localStorage.getItem("cli-proxy-auth");
@@ -693,8 +695,7 @@ async function connect(auto, fromConsole) {
     }
     show("connect", false); show("logout", !fromConsole);
   } catch (e) {
-    show("loading", false);
-    show("connect", true);
+    show("loading", false); show("connect", true);
     $("connectErr").textContent = e.status === 401 || e.status === 403 ? "The management key was rejected." : e.message;
     show("connectErr", true);
     if (auto) { localStorage.removeItem(STORE_KEY); sessionStorage.removeItem(STORE_KEY); }
@@ -704,24 +705,15 @@ async function connect(auto, fromConsole) {
 $("connectBtn").onclick = () => connect(false);
 $("key").addEventListener("keydown", (e) => { if (e.key === "Enter") connect(false); });
 $("logout").onclick = () => { localStorage.removeItem(STORE_KEY); sessionStorage.removeItem(STORE_KEY); location.reload(); };
-$("addAlias").onclick = addAlias;
-$("newAlias").addEventListener("keydown", (e) => { if (e.key === "Enter") addAlias(); });
-$("filter").addEventListener("input", () => render());
+$("addPool").onclick = addPool;
+$("newPool").addEventListener("keydown", (e) => { if (e.key === "Enter") addPool(); });
+$("search").addEventListener("input", () => renderSources());
 $("reload").onclick = () => load().catch((e) => toast(e.message, true));
 $("discard").onclick = () => load().catch((e) => toast(e.message, true));
 $("save").onclick = openReview;
 $("showChanges").onclick = openReview;
 $("closeReview").onclick = $("cancelReview").onclick = () => $("review").close();
 $("confirmSave").onclick = save;
-document.querySelectorAll(".chip[data-kind]").forEach((c) => {
-  c.classList.toggle("on", kinds.has(c.dataset.kind));
-  c.onclick = () => {
-    kinds.has(c.dataset.kind) ? kinds.delete(c.dataset.kind) : kinds.add(c.dataset.kind);
-    c.classList.toggle("on", kinds.has(c.dataset.kind));
-    localStorage.setItem(STORE_KINDS, JSON.stringify([...kinds]));
-    if (S) render();
-  };
-});
 window.addEventListener("beforeunload", (e) => { if (S && plan().changes.length) { e.preventDefault(); e.returnValue = ""; } });
 initConnect();
 })();
