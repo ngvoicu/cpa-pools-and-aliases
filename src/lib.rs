@@ -120,10 +120,17 @@ fn error_envelope(code: &str, message: &str) -> Vec<u8> {
 
 // ------------------------------------------------------------------ state
 
-/// lower-cased pool name -> label shown to clients
-fn pools() -> &'static RwLock<HashMap<String, String>> {
-    static POOLS: OnceLock<RwLock<HashMap<String, String>>> = OnceLock::new();
-    POOLS.get_or_init(|| RwLock::new(HashMap::new()))
+#[derive(Clone, Default, Debug)]
+struct Settings {
+    /// lower-cased pool name -> label shown to clients
+    pools: HashMap<String, String>,
+    /// model lists show only the pools (requests for other models still work)
+    pools_only: bool,
+}
+
+fn settings() -> &'static RwLock<Settings> {
+    static SETTINGS: OnceLock<RwLock<Settings>> = OnceLock::new();
+    SETTINGS.get_or_init(|| RwLock::new(Settings::default()))
 }
 
 fn page_b64() -> &'static str {
@@ -137,13 +144,20 @@ struct LifecycleRequest {
     config_yaml: Option<String>,
 }
 
-/// Accepts both `pools: [zeus, ...]` and `pools: [{name: zeus, label: Zeus}, ...]`.
-fn parse_pools(yaml: &[u8]) -> HashMap<String, String> {
-    let mut out = HashMap::new();
+/// Plugin config: `pools: [zeus, ...]` or `pools: [{name: zeus, label: Zeus}, ...]`, plus `pools-only: bool`.
+fn parse_settings(yaml: &[u8]) -> Settings {
     let doc: serde_yaml::Value = match serde_yaml::from_slice(yaml) {
         Ok(v) => v,
-        Err(_) => return out,
+        Err(_) => return Settings::default(),
     };
+    Settings {
+        pools: parse_pools(&doc),
+        pools_only: doc.get("pools-only").and_then(|v| v.as_bool()).unwrap_or(false),
+    }
+}
+
+fn parse_pools(doc: &serde_yaml::Value) -> HashMap<String, String> {
+    let mut out = HashMap::new();
     let list = match doc.get("pools").and_then(|p| p.as_sequence()) {
         Some(l) => l,
         None => return out,
@@ -169,8 +183,8 @@ fn parse_pools(yaml: &[u8]) -> HashMap<String, String> {
 fn apply_config(request: &[u8]) {
     let req: LifecycleRequest = serde_json::from_slice(request).unwrap_or_default();
     let yaml = req.config_yaml.and_then(|s| B64.decode(s.as_bytes()).ok()).unwrap_or_default();
-    let parsed = parse_pools(&yaml);
-    if let Ok(mut guard) = pools().write() {
+    let parsed = parse_settings(&yaml);
+    if let Ok(mut guard) = settings().write() {
         *guard = parsed;
     }
 }
@@ -227,8 +241,9 @@ struct InterceptRequest {
 
 /// Returns a ResponseInterceptResponse with a new Body, or None to leave the response untouched.
 fn intercept_response(request: &[u8]) -> Option<Value> {
-    let table = pools().read().ok()?.clone();
-    if table.is_empty() {
+    let cfg = settings().read().ok()?.clone();
+    // With no pools there is nothing to rename, and "pools only" would leave clients an empty list.
+    if cfg.pools.is_empty() {
         return None;
     }
     let req: InterceptRequest = serde_json::from_slice(request).ok()?;
@@ -238,7 +253,7 @@ fn intercept_response(request: &[u8]) -> Option<Value> {
     }
     let raw = B64.decode(req.Body?.as_bytes()).ok()?;
     let mut body: Value = serde_json::from_slice(&raw).ok()?;
-    if !clean_model_list(&mut body, &table) {
+    if !clean_model_list(&mut body, &cfg) {
         return None;
     }
     let out = serde_json::to_vec(&body).ok()?;
@@ -249,14 +264,20 @@ fn intercept_response(request: &[u8]) -> Option<Value> {
 ///   OpenAI/Claude  {"data":[{"id","display_name"?}]}
 ///   Codex clients  {"models":[{"slug","display_name"}]}
 ///   Gemini         {"models":[{"name":"models/<id>","displayName"}]}
-fn clean_model_list(body: &mut Value, table: &HashMap<String, String>) -> bool {
+/// With `pools_only`, every entry that isn't a pool is dropped.
+fn clean_model_list(body: &mut Value, cfg: &Settings) -> bool {
     let mut changed = false;
     for key in ["data", "models"] {
         let Some(Value::Array(items)) = body.get_mut(key) else { continue };
+        let before = items.len();
+        items.retain(|item| {
+            !cfg.pools_only || item.as_object().and_then(model_id).is_some_and(|id| cfg.pools.contains_key(&id.to_lowercase()))
+        });
+        changed |= items.len() != before;
         for item in items.iter_mut() {
             let Value::Object(obj) = item else { continue };
             let Some(id) = model_id(obj) else { continue };
-            let Some(label) = table.get(&id.to_lowercase()) else { continue };
+            let Some(label) = cfg.pools.get(&id.to_lowercase()) else { continue };
             changed |= set_label(obj, label);
         }
     }
@@ -301,15 +322,34 @@ fn set_label(obj: &mut Map<String, Value>, label: &str) -> bool {
 mod tests {
     use super::*;
 
-    fn table() -> HashMap<String, String> {
-        parse_pools(b"enabled: true\npools:\n  - zeus\n  - name: argon\n    label: Argon Pool\n")
+    fn table() -> Settings {
+        parse_settings(b"enabled: true\npools:\n  - zeus\n  - name: argon\n    label: Argon Pool\n")
     }
 
     #[test]
     fn parses_strings_and_objects() {
         let t = table();
-        assert_eq!(t.get("zeus").map(String::as_str), Some("zeus"));
-        assert_eq!(t.get("argon").map(String::as_str), Some("Argon Pool"));
+        assert_eq!(t.pools.get("zeus").map(String::as_str), Some("zeus"));
+        assert_eq!(t.pools.get("argon").map(String::as_str), Some("Argon Pool"));
+        assert!(!t.pools_only);
+        assert!(parse_settings(b"pools-only: true\npools: [zeus]\n").pools_only);
+    }
+
+    #[test]
+    fn pools_only_hides_everything_else() {
+        let mut t = table();
+        t.pools_only = true;
+        let mut codex = json!({"models":[{"slug":"zeus","display_name":"x (Devin)"},{"slug":"gpt-6"}]});
+        assert!(clean_model_list(&mut codex, &t));
+        assert_eq!(codex["models"].as_array().unwrap().len(), 1);
+        assert_eq!(codex["models"][0]["display_name"], "zeus");
+        let mut gemini = json!({"models":[{"name":"models/gemini-4"},{"name":"models/ARGON","displayName":"y"}],"nextPageToken":""});
+        assert!(clean_model_list(&mut gemini, &t));
+        assert_eq!(gemini["models"].as_array().unwrap().len(), 1);
+        assert_eq!(gemini["models"][0]["displayName"], "Argon Pool");
+        let mut openai = json!({"object":"list","data":[{"id":"zeus"},{"id":"claude-opus-5-5"},{"bogus":1}]});
+        assert!(clean_model_list(&mut openai, &t));
+        assert_eq!(openai["data"], json!([{"id":"zeus"}]));
     }
 
     #[test]
@@ -334,7 +374,7 @@ mod tests {
 
     #[test]
     fn leaves_model_responses_alone() {
-        pools().write().unwrap().insert("zeus".into(), "zeus".into());
+        settings().write().unwrap().pools.insert("zeus".into(), "zeus".into());
         let body = B64.encode(br#"{"models":[{"slug":"zeus","display_name":"x (Devin)"}]}"#);
         let req = json!({"Model":"zeus","RequestedModel":"zeus","Body":body}).to_string();
         assert!(intercept_response(req.as_bytes()).is_none());

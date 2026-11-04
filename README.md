@@ -31,6 +31,9 @@ the members, while your Routing tiers (Preferred → Fallback 1 → …) still d
 - **One model per account or key per pool.** Adding a second model from the same source replaces the first.
 - **keep original names** (CPA's `fork`, on by default) keeps the accounts' real model names working next to
   the pool name, on accounts and API keys. Turn it off and the pool name is the only way to reach them.
+- **Clients see: Pools and models / Pools only.** With *Pools only*, model lists (`/v1/models` and every
+  other format) show just your pools; all other models disappear from client pickers. It only hides them:
+  a client that asks for a hidden model by name still gets it. Stored as `pools-only: true` in the plugin config.
 - Every save shows a review of the exact changes first. Deleting a pool removes only the aliases it created.
 - **Clean pool names in model lists.** A pool spans many providers, so CPA would otherwise show
   whichever member's name it picked, like `Claude Opus 5.5 (Devin)`. The plugin rewrites pool entries in
@@ -104,8 +107,8 @@ After `make install`, restart CPA so it loads the new library. To update a runni
 (a restart drops session affinity, and with it your prompt caches), install a versioned copy and pin it:
 
 ```bash
-cp dist/cpa-pools-and-aliases.dylib ~/.cli-proxy-api/plugins/cpa-pools-and-aliases-v0.2.1.dylib
-# then in the CPA config:  plugins.configs.cpa-pools-and-aliases.version: "0.2.1"
+cp dist/cpa-pools-and-aliases.dylib ~/.cli-proxy-api/plugins/cpa-pools-and-aliases-v0.3.0.dylib
+# then in the CPA config:  plugins.configs.cpa-pools-and-aliases.version: "0.3.0"
 ```
 
 CPA hot-reloads the plugin as soon as it sees the config change. The plugin store does the same.

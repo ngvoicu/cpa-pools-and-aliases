@@ -46,6 +46,11 @@ input:focus, select:focus { border-color: var(--accent); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start; }
 @media (max-width: 1050px) { .layout { grid-template-columns: 1fr; } }
 .toolbar { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; flex-wrap: wrap; }
+.seg { display: inline-flex; border: 1px solid var(--border2); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: transparent; color: var(--muted); padding: 7px 11px; cursor: pointer; font: inherit; }
+.seg button + button { border-left: 1px solid var(--border2); }
+.seg button.on { background: var(--panel2); color: var(--text); font-weight: 600; }
+.seg button:disabled { opacity: .45; cursor: default; }
 .pools { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; }
 
 .pool { padding: 14px; transition: border-color .12s, background .12s; }
@@ -145,6 +150,11 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
       <input type="text" id="newPool" placeholder="new pool name, e.g. opus" style="width:240px" spellcheck="false">
       <button class="btn primary" id="addPool">+ Create pool</button>
       <span style="flex:1"></span>
+      <span class="hint">Clients see</span>
+      <span class="seg" id="seeSeg" title="What model lists (/v1/models) show to clients">
+        <button type="button" data-v="all">Pools and models</button>
+        <button type="button" data-v="pools">Pools only</button>
+      </span>
       <button class="btn" id="reload" title="Reload from CPA">↻ Reload</button>
       <a class="btn ghost hidden" id="newtab" href="#" target="_blank" rel="noopener" title="Open in a new tab">↗</a>
       <button class="btn ghost hidden" id="logout" title="Forget the management key">Disconnect</button>
@@ -342,7 +352,9 @@ async function load() {
   for (const s of sources) s.options = optionsFor(s, poolNames, catalogs);
 
   const pools = registered.map((r, i) => readPool(r.name, "p" + i, sources, r.label));
-  S = { config, pluginCfg: pluginCfg || {}, sources, pools, nextId: pools.length, catalogs, registered };
+  const poolsOnly = !!(pluginCfg && pluginCfg["pools-only"] === true);
+  S = { config, pluginCfg: pluginCfg || {}, sources, pools, nextId: pools.length, catalogs, registered,
+    poolsOnly, origPoolsOnly: poolsOnly };
   show("loading", false); show("app", true);
   render();
 }
@@ -484,16 +496,33 @@ function plan() {
     }
     if (!changes.length) changes.push({ t: "mod", text: "~ pool list", where: "" });
   }
-  return { changes, notes, touched, names, registryChanged };
+  const seeChanged = S.poolsOnly !== S.origPoolsOnly;
+  if (seeChanged) {
+    changes.push({ t: "mod", text: `~ clients see: ${S.poolsOnly ? "pools only" : "pools and models"}`, where: "" });
+    if (S.poolsOnly) notes.push("Pools only hides every other model from model lists. Clients that already know a model's " +
+      "name can still use it; to retire a model completely, remove or exclude it in CPA.");
+  }
+  return { changes, notes, touched, names, registryChanged, seeChanged };
 }
 
 // ------------------------------------------------------------------ render
 function render() {
+  renderSee();
   renderPools();
   renderSources();
   const { changes } = plan();
   $("pendingCount").textContent = changes.length + " change" + (changes.length === 1 ? "" : "s");
   show("pending", changes.length > 0);
+}
+
+function renderSee() {
+  const live = S.pools.some((p) => !p.deleted);
+  for (const b of $("seeSeg").querySelectorAll("button")) {
+    b.classList.toggle("on", (b.dataset.v === "pools") === S.poolsOnly);
+    b.disabled = b.dataset.v === "pools" && !live && !S.poolsOnly;
+  }
+  $("seeSeg").title = live ? "What model lists (/v1/models) show to clients"
+    : "Create a pool first. With no pools, clients always see every model.";
 }
 
 function renderPools() {
@@ -662,7 +691,7 @@ function openReview() {
 }
 
 async function save() {
-  const { touched, names, registryChanged } = plan();
+  const { touched, names, registryChanged, seeChanged } = plan();
   const btn = $("confirmSave");
   btn.disabled = true; btn.replaceChildren(h("span", { class: "spin" }), " Saving…");
   const errors = [];
@@ -687,6 +716,9 @@ async function save() {
     // pool list last, so a failed alias write never leaves pools CPA doesn't know about
     if (registryChanged && errors.length === 0) {
       try { await api("PUT", `/config/plugins/configs/${PLUGIN_ID}/pools`, names); } catch (e) { errors.push(e.message); }
+    }
+    if (seeChanged && errors.length === 0) {
+      try { await api("PUT", `/config/plugins/configs/${PLUGIN_ID}/pools-only`, S.poolsOnly); } catch (e) { errors.push(e.message); }
     }
   } finally {
     btn.disabled = false; btn.textContent = "Save";
@@ -762,6 +794,12 @@ $("addPool").onclick = addPool;
 $("newPool").addEventListener("keydown", (e) => { if (e.key === "Enter") addPool(); });
 $("search").addEventListener("input", () => renderSources());
 $("reload").onclick = () => load().catch((e) => toast(e.message, true));
+$("seeSeg").onclick = (e) => {
+  const b = e.target.closest("button");
+  if (!b || b.disabled || !S) return;
+  S.poolsOnly = b.dataset.v === "pools";
+  render();
+};
 $("discard").onclick = () => load().catch((e) => toast(e.message, true));
 $("save").onclick = openReview;
 $("showChanges").onclick = openReview;
