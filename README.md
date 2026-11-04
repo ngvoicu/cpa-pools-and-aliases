@@ -32,6 +32,10 @@ the members, while your Routing tiers (Preferred → Fallback 1 → …) still d
 - **keep original names** (CPA's `fork`, on by default) keeps the accounts' real model names working next to
   the pool name. API keys always keep them.
 - Every save shows a review of the exact changes first. Deleting a pool removes only the aliases it created.
+- **Clean pool names in model lists.** A pool spans many providers, so CPA would otherwise show
+  whichever member's name it picked, like `Claude Opus 5.5 (Devin)`. The plugin rewrites pool entries in
+  every model list CPA serves (OpenAI, Claude, Gemini and Codex-style clients such as pi) to the pool's
+  label, set on the card as **Shown to clients as**. Regular models keep their own names.
 
 Where a pool member is saved:
 
@@ -87,23 +91,21 @@ authentication, and every write still requires the management key.
 
 ## Build
 
-The plugin is plain C11 with no dependencies, plus a `python3` step that embeds `web/index.html`.
+Rust (stable). The page in `web/index.html` is embedded into the library at compile time.
 
 ```bash
-make build                          # dist/cpa-pools-and-aliases.{dylib,so,dll}
-make package                        # dist/cpa-pools-and-aliases_<version>_<goos>_<goarch>.zip
-make package GOOS=darwin GOARCH=amd64
-make package GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc
+make build      # dist/cpa-pools-and-aliases.{dylib,so,dll}
+make test
+make install PLUGINS_DIR=~/.cli-proxy-api/plugins
+make package TARGET=aarch64-apple-darwin GOOS=darwin GOARCH=arm64   # release zip
 ```
 
-UI work: edit `web/index.html`, then run `make build install` and restart CPA. You can also open the file
-straight in a browser. It then asks for the CPA URL, which needs management access allowed from
-that origin.
+After `make install`, restart CPA so it loads the new library.
 
 ## Release
 
-1. Bump `VERSION` (for example `0.2.0`) and commit.
-2. `git tag v0.2.0 && git push --tags`
+1. Bump `version` in `Cargo.toml` (for example `0.3.0`) and commit.
+2. `git tag v0.3.0 && git push --tags`
 
 GitHub Actions builds darwin/arm64, darwin/amd64, linux/amd64, linux/arm64 and windows/amd64. It
 then publishes the release with the asset layout the CPA plugin store expects:

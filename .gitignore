@@ -4,3 +4,4 @@ dist/
 *.so
 *.dll
 .DS_Store
+target/

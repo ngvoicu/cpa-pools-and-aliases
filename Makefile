@@ -1,65 +1,46 @@
 ID      := cpa-pools-and-aliases
-VERSION := $(shell cat VERSION)
+VERSION := $(shell sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)
+UNAME_S := $(shell uname -s)
 
-# Target platform (Go-style names, used for the release zip name).
-HOST_OS   := $(shell uname -s | tr A-Z a-z)
-HOST_ARCH := $(shell uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
-GOOS   ?= $(HOST_OS)
-GOARCH ?= $(HOST_ARCH)
-
-ifeq ($(GOOS),darwin)
+ifeq ($(UNAME_S),Darwin)
 EXT := dylib
-SHARED := -dynamiclib -Wl,-install_name,@rpath/$(ID).dylib
-CLANG_ARCH := $(if $(filter amd64,$(GOARCH)),x86_64,arm64)
-ARCH_FLAGS ?= -arch $(CLANG_ARCH) -mmacosx-version-min=11.0
-else ifeq ($(GOOS),windows)
+LIB := libcpa_pools_and_aliases.dylib
+else ifneq (,$(findstring MINGW,$(UNAME_S))$(findstring MSYS,$(UNAME_S)))
 EXT := dll
-SHARED := -shared -static-libgcc
-ARCH_FLAGS ?=
+LIB := cpa_pools_and_aliases.dll
 else
 EXT := so
-SHARED := -shared
-ARCH_FLAGS ?=
+LIB := libcpa_pools_and_aliases.so
 endif
-
-CC      ?= cc
-CFLAGS  ?= -O2
-CFLAGS  += -std=c11 -Wall -Wextra -fPIC -fvisibility=hidden -DPLUGIN_VERSION=\"$(VERSION)\" -Ibuild
-PYTHON  ?= python3
-
-LIB := dist/$(ID).$(EXT)
-ZIP := dist/$(ID)_$(VERSION)_$(GOOS)_$(GOARCH).zip
 
 # Where `make install` copies the plugin. Must match plugins.dir in your CPA config.
 PLUGINS_DIR ?= $(HOME)/.cli-proxy-api/plugins
 
-.PHONY: all build package install clean version
+.PHONY: build test install package clean version
 
-all: build
-
-build: $(LIB)
-
-build/page.h: web/index.html scripts/embed.py
-	@mkdir -p build
-	$(PYTHON) scripts/embed.py web/index.html $@
-
-$(LIB): src/plugin.c build/page.h VERSION
+build:
+	cargo build --release
 	@mkdir -p dist
-	$(CC) $(CFLAGS) $(ARCH_FLAGS) $(SHARED) -o $@ src/plugin.c
+	cp target/release/$(LIB) dist/$(ID).$(EXT)
 
-# Release asset: zip with the library at the zip root, named <id>.<ext>.
-package: $(LIB)
-	@rm -f $(ZIP)
-	cd dist && zip -q -X $(notdir $(ZIP)) $(notdir $(LIB))
-	@echo "packaged $(ZIP)"
+test:
+	cargo test --release
 
-install: $(LIB)
+install: build
 	@mkdir -p $(PLUGINS_DIR)
-	cp $(LIB) $(PLUGINS_DIR)/$(ID).$(EXT)
+	@# copy then rename: never overwrite a library a running CPA has mapped
+	cp dist/$(ID).$(EXT) $(PLUGINS_DIR)/.$(ID).$(EXT).tmp
+	mv -f $(PLUGINS_DIR)/.$(ID).$(EXT).tmp $(PLUGINS_DIR)/$(ID).$(EXT)
 	@echo "installed to $(PLUGINS_DIR)/$(ID).$(EXT)"
+
+# Release asset for one platform, e.g.:
+#   make package TARGET=aarch64-apple-darwin GOOS=darwin GOARCH=arm64
+package:
+	scripts/package.sh $(TARGET) $(GOOS) $(GOARCH)
 
 version:
 	@echo $(VERSION)
 
 clean:
-	rm -rf build dist
+	cargo clean
+	rm -rf dist build

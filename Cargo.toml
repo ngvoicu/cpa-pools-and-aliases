@@ -1,0 +1,23 @@
+[package]
+name = "cpa-pools-and-aliases"
+version = "0.2.0"
+edition = "2021"
+description = "CLIProxyAPI plugin: model pools built from CPA's native aliases, with clean pool names in model lists"
+license = "MIT"
+repository = "https://github.com/ngvoicu/cpa-pools-and-aliases"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

@@ -57,6 +57,10 @@ input:focus, select:focus { border-color: var(--accent); }
 .pool-name:hover { border-color: var(--border2); }
 .pool-name.changed { outline: 2px solid var(--warn); outline-offset: -1px; }
 .pool.deleted .pool-name { text-decoration: line-through; }
+.pool-label { display: flex; align-items: center; gap: 8px; margin: 6px 0 0 6px; }
+.pool-label input { flex: 1; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; font-size: 13px; }
+.pool-label input:hover { border-color: var(--border2); }
+.pool-label input.changed { outline: 2px solid var(--warn); outline-offset: -1px; }
 .pool-meta { display: flex; align-items: center; justify-content: space-between; color: var(--faint); font-size: 12px; margin: 4px 0 10px 6px; }
 .pool-meta label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
 .members { display: flex; flex-direction: column; gap: 6px; min-height: 44px; }
@@ -270,8 +274,11 @@ async function load() {
     api("GET", "/credentials"),
     api("GET", "/config/plugins/configs/" + PLUGIN_ID).catch(() => ({})),
   ]);
+  // pools: [{name, label}] (plain strings accepted). The plugin binary reads the same list to give
+  // pool entries a clean display name in model lists.
   const registered = (Array.isArray(pluginCfg && pluginCfg.pools) ? pluginCfg.pools : [])
-    .map((p) => (typeof p === "string" ? p : p && p.name)).filter(Boolean);
+    .map((p) => (typeof p === "string" ? { name: p, label: "" } : { name: p && p.name, label: (p && p.label) || "" }))
+    .filter((p) => p.name);
   const files = (creds && (creds.files || creds.items)) || [];
   const authFiles = files.filter((f) => f && f.name && (f.source ? f.source === "file" : /\.json$/i.test(f.name)) && !f.runtime_only);
   const globalAliases = (config.oauth && config.oauth["model-alias"]) || {};
@@ -331,10 +338,10 @@ async function load() {
   const order = { auth: 0, apikey: 1 };
   sources.sort((a, b) => byName(a.provider, b.provider) || order[a.kind] - order[b.kind] || byName(a.label, b.label));
 
-  const poolNames = new Set(registered.map(lc));
+  const poolNames = new Set(registered.map((p) => lc(p.name)));
   for (const s of sources) s.options = optionsFor(s, poolNames, catalogs);
 
-  const pools = registered.map((name, i) => readPool(name, "p" + i, sources));
+  const pools = registered.map((r, i) => readPool(r.name, "p" + i, sources, r.label));
   S = { config, pluginCfg: pluginCfg || {}, sources, pools, nextId: pools.length, catalogs, registered };
   show("loading", false); show("app", true);
   render();
@@ -364,18 +371,23 @@ function optionsFor(s, poolNames, catalogs) {
   return [...out.values()].sort((a, b) => byName(a.name, b.name));
 }
 
-function readPool(name, id, sources) {
-  const members = new Map();
+function readPool(name, id, sources, savedLabel) {
+  const members = new Map(), labels = new Map();
   let fork = null;
   for (const s of sources) {
     const e = s.entries.find((x) => isAliasEntry(x) && lc(x.alias) === lc(name));
     if (!e) continue;
     members.set(s.id, e.name);
+    labels.set(s.id, typeof e["display-name"] === "string" ? e["display-name"] : "");
     if (s.kind === "auth") fork = fork || e.fork === true;
   }
-  return { id, name, origName: name, fork: fork !== false, origFork: fork !== false,
-    members, origMembers: new Map(members), deleted: false, isNew: false };
+  const label = savedLabel || [...labels.values()].find(Boolean) || name;
+  return { id, name, origName: name, label, fork: fork !== false, origFork: fork !== false,
+    members, origMembers: new Map(members), labels, deleted: false, isNew: false };
 }
+// What clients see as the model's name. Every member carries the same display-name, otherwise
+// CPA shows whichever member's own name it registered last (e.g. "Claude Opus 5.5 (Devin)").
+const poolLabel = (p) => (p.label || "").trim() || p.name;
 
 const srcById = (id) => S.sources.find((s) => s.id === id);
 const srcLabel = (s) => `${prov(s.provider).label}${s.kind === "apikey" ? " API key" : ""} · ${s.label}`;
@@ -398,13 +410,15 @@ function plan() {
       const a = p.deleted ? undefined : p.members.get(s.id);
       const renamed = !!p.origName && p.origName !== p.name;
       const forkChanged = s.kind === "auth" && p.fork !== p.origFork;
+      const labelChanged = !!a && !!b && (p.labels && p.labels.get(s.id) || "") !== poolLabel(p);
       if (!b && !a) continue;
-      if (b === a && !renamed && !forkChanged) continue;
+      if (b === a && !renamed && !forkChanged && !labelChanged) continue;
       dirty = true;
       if (!b) changes.push({ t: "add", text: `+ ${p.name} ← ${a}`, where });
       else if (!a) changes.push({ t: "del", text: `− ${p.origName} ← ${b}`, where });
       else if (b !== a || renamed) changes.push({ t: "mod", text: `~ ${p.origName}${renamed ? " ⇒ " + p.name : ""}: ${b}${b !== a ? " → " + a : ""}`, where });
-      else changes.push({ t: "mod", text: `~ ${p.name}: keep original names ${p.fork ? "on" : "off"}`, where });
+      else if (forkChanged) changes.push({ t: "mod", text: `~ ${p.name}: keep original names ${p.fork ? "on" : "off"}`, where });
+      else changes.push({ t: "mod", text: `~ ${p.name}: shown to clients as “${poolLabel(p)}”`, where });
     }
     if (!dirty) continue;
     // rebuild: drop every alias entry that belongs to a managed pool name, then add current members
@@ -415,7 +429,7 @@ function plan() {
     });
     for (const [, { pool, model }] of after) {
       const tpl = (pool.origName && templates.get(lc(pool.origName))) || {};
-      const entry = { ...tpl, name: model, alias: pool.name };
+      const entry = { ...tpl, name: model, alias: pool.name, "display-name": poolLabel(pool) };
       if (s.kind === "auth") { if (pool.fork) entry.fork = true; else delete entry.fork; }
       entries.push(entry);
     }
@@ -428,12 +442,16 @@ function plan() {
     }
     touched.set(s.id, entries);
   }
-  const names = S.pools.filter((p) => !p.deleted).map((p) => p.name);
-  const registryChanged = JSON.stringify(names) !== JSON.stringify(S.registered);
+  const names = S.pools.filter((p) => !p.deleted).map((p) => ({ name: p.name, label: poolLabel(p) }));
+  const registryChanged = JSON.stringify(names) !== JSON.stringify(S.registered.map((r) => ({ name: r.name, label: r.label || r.name })));
   if (registryChanged && !changes.length) {
     for (const p of S.pools) {
       if (p.isNew && !p.deleted) changes.push({ t: "add", text: `+ pool ${p.name} (empty)`, where: "" });
       if (!p.isNew && p.deleted) changes.push({ t: "del", text: `− pool ${p.origName}`, where: "" });
+    }
+    for (const p of S.pools) {
+      const r = S.registered.find((x) => x.name === p.origName);
+      if (!changes.length && r && !p.deleted && (r.label || r.name) !== poolLabel(p)) changes.push({ t: "mod", text: `~ ${p.name}: shown to clients as “${poolLabel(p)}”`, where: "" });
     }
     if (!changes.length) changes.push({ t: "mod", text: "~ pool list", where: "" });
   }
@@ -478,6 +496,7 @@ function poolCard(p) {
       const v = ev.target.value.trim();
       const err = v === p.name ? null : nameProblem(v, p);
       if (!v || err) { if (err) toast(err, true); ev.target.value = p.name; return; }
+      if (poolLabel(p) === p.name) p.label = v;
       p.name = v; render();
     } });
   const del = p.deleted
@@ -485,6 +504,11 @@ function poolCard(p) {
     : h("button", { class: "btn ghost danger", title: "Delete this pool (removes only the aliases it created)",
         onclick: () => { if (p.isNew) S.pools.splice(S.pools.indexOf(p), 1); else p.deleted = true; render(); } }, "✕");
   card.append(h("div", { class: "pool-head" }, name, del));
+  card.append(h("div", { class: "pool-label" },
+    h("span", { class: "hint" }, "Shown to clients as"),
+    h("input", { type: "text", value: poolLabel(p), disabled: p.deleted, spellcheck: "false", placeholder: p.name,
+      class: (p.labels && [...p.members.keys()].some((sid) => p.origMembers.has(sid) && (p.labels.get(sid) || "") !== poolLabel(p))) ? "changed" : "",
+      onchange: (ev) => { p.label = ev.target.value.trim() || p.name; render(); } })));
   card.append(h("div", { class: "pool-meta" },
     h("span", {}, `${p.members.size} model${p.members.size === 1 ? "" : "s"}`),
     h("label", { title: "Accounts keep showing their real model names next to the pool name (CPA's fork option). API keys always keep them." },
@@ -594,7 +618,7 @@ function addPool() {
   const v = $("newPool").value.trim();
   const err = nameProblem(v, null);
   if (err) { toast(err, true); return; }
-  S.pools.push({ id: "p" + (S.nextId++), name: v, origName: null, fork: true, origFork: true,
+  S.pools.push({ id: "p" + (S.nextId++), name: v, origName: null, label: v, labels: new Map(), fork: true, origFork: true,
     members: new Map(), origMembers: new Map(), deleted: false, isNew: true });
   $("newPool").value = "";
   render();
