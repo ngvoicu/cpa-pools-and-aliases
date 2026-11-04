@@ -1,6 +1,6 @@
 [package]
 name = "cpa-pools-and-aliases"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "CLIProxyAPI plugin: model pools built from CPA's native aliases, with clean pool names in model lists"
 license = "MIT"

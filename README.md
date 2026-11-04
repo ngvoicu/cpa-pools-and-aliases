@@ -5,40 +5,44 @@
 A [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA) plugin that adds a **Pools** page to the
 management console.
 
-Every source names the same model differently: Devin has `devin/claude-opus-5-5`, Claude Code
-has `claude-opus-5-5`, an API key has whatever you configured. Create a pool such as `opus`, then
-drag models into it from any account or API key. Clients ask for `opus` and CPA spreads requests across
-the members, while your Routing tiers (Preferred → Fallback 1 → …) still decide the order.
+A pool is **one model served by several accounts or keys**. Every source names the same model differently:
+Devin has `devin/claude-opus-5-5`, Claude Code has `claude-opus-5-5`, an API key has whatever you configured.
+Pick a model, give the pool a name such as `zeus`, and every source that offers that model joins. Clients
+ask for `claude-opus-5-5`, see it listed as **zeus**, and CPA spreads requests across all members while your
+Routing tiers (Preferred → Fallback 1 → …) still decide the order.
 
 ```
-┌ opus ───────────────────────────────┐   Models (drag onto a pool)
-│ claude-opus-5-5   Claude · gabriel@…│   ▾ Claude  gabriel@…      claude-opus-5-5 …
-│ claude-opus-5-5   Claude API · c-1  │   ▾ Devin   gabriel@…      devin/claude-opus-5-5 …
-│ devin/claude-opus-5-5  Devin · …    │   ▾ Claude API key claude-1 …
-│ + Add model…                        │
-└─────────────────────────────────────┘
+┌ zeus ─────────────────────────────── ✕ ┐   Models (drag onto a pool)
+│ model claude-opus-5-5     Switch to… ▾ │   ▾ Claude  gabriel@…      claude-opus-5-5 …
+│ claude-opus-5-5  DIRECT  Claude · …    │   ▾ Devin   gabriel@…      devin/claude-opus-5-5 …
+│ claude-opus-5-5  DIRECT  API key c-1   │   ▾ Claude API key claude-1 …
+│ devin/claude-opus-5-5    Devin · …   ✕ │
+└────────────────────────────────────────┘
 ```
 
 ## How it works
 
-- **Pools are CPA's own model aliases.** Adding a model to `opus` writes an alias `opus → <model>` on that
-  account or key. The plugin has no router or scheduler and doesn't touch requests. Disable it and your
-  pools keep working.
-- **Only its own pools.** The list of pool names is kept in `plugins.configs.cpa-pools-and-aliases.pools`. Aliases made
-  anywhere else (console, hand-edited config, per-account files) are never shown or changed.
-- **Name guardrails.** A pool can't use a name that is already a real model name, a global alias, or an
-  alias made elsewhere. Otherwise the two would silently merge.
-- **One model per account or key per pool.** Adding a second model from the same source replaces the first.
-- **keep original names** (CPA's `fork`, on by default) keeps the accounts' real model names working next to
-  the pool name, on accounts and API keys. Turn it off and the pool name is the only way to reach them.
-- **Clients see: Pools and models / Pools only.** With *Pools only*, model lists (`/v1/models` and every
-  other format) show just your pools; all other models disappear from client pickers. It only hides them:
-  a client that asks for a hidden model by name still gets it. Stored as `pools-only: true` in the plugin config.
-- Every save shows a review of the exact changes first. Deleting a pool removes only the aliases it created.
-- **Clean pool names in model lists.** A pool spans many providers, so CPA would otherwise show
-  whichever member's name it picked, like `Claude Opus 5.5 (Devin)`. The plugin rewrites pool entries in
-  every model list CPA serves (OpenAI, Claude, Gemini and Codex-style clients such as pi) to the pool's
-  label, set on the card as **Shown to clients as**. Regular models keep their own names.
+- **One model per pool.** A pool's CPA name is the model's own id (`claude-opus-5-5`), so clients price it,
+  size its context and pick reasoning levels as that model, and failover never silently changes models.
+  Sources match across providers by ignoring the `vendor/` prefix, case and punctuation
+  (`devin/gpt-6-1-sol` = `gpt-6.1-sol`). Dropping a different model on a pool is refused.
+- **Pools are CPA's own model aliases.** Members that already serve the exact id are in the pool
+  automatically (marked *direct*); others get an alias `<their model> → <pool id>`. The plugin doesn't
+  route or schedule anything. Disable it and your pools keep working.
+- **A name for clients.** The pool's name (`zeus`) replaces the model's display name in every model list
+  CPA serves (OpenAI, Claude, Gemini and Codex-style clients such as pi), so a pool never shows up as
+  `Claude Opus 5.5 (Devin)`. Regular models keep their own names.
+- **Switch to…** moves every member to another model in one save, e.g. when Opus 6 ships. The pool keeps
+  its name; members that don't offer the new model leave it.
+- **Clients see: Pools and models / Pools only.** With *Pools only*, model lists show just your pools; all
+  other models disappear from client pickers. It only hides them: a client that asks for a hidden model by
+  name still gets it. Stored as `pools-only: true` in the plugin config.
+- **Only its own pools.** The pool list is kept in `plugins.configs.cpa-pools-and-aliases.pools` as
+  `{name: <model id>, label: <shown name>}`. Aliases for other names are never shown or changed.
+- Every save shows a review of the exact changes first. Deleting a pool removes only the aliases it created;
+  sources that serve the model directly keep serving it.
+- Pools from v0.3 and earlier had free names (`zeus`). The page renames them to their model id and keeps the
+  old name as the label; review and save once. Clients that asked for the old name must use the model id.
 
 Where a pool member is saved:
 
@@ -107,8 +111,8 @@ After `make install`, restart CPA so it loads the new library. To update a runni
 (a restart drops session affinity, and with it your prompt caches), install a versioned copy and pin it:
 
 ```bash
-cp dist/cpa-pools-and-aliases.dylib ~/.cli-proxy-api/plugins/cpa-pools-and-aliases-v0.3.0.dylib
-# then in the CPA config:  plugins.configs.cpa-pools-and-aliases.version: "0.3.0"
+cp dist/cpa-pools-and-aliases.dylib ~/.cli-proxy-api/plugins/cpa-pools-and-aliases-v0.4.0.dylib
+# then in the CPA config:  plugins.configs.cpa-pools-and-aliases.version: "0.4.0"
 ```
 
 CPA hot-reloads the plugin as soon as it sees the config change. The plugin store does the same.
