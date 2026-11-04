@@ -19,7 +19,8 @@ mkdir -p dist
 cp "target/$target/release/$src" "dist/$id.$ext"
 zip="dist/${id}_${version}_${goos}_${goarch}.zip"
 rm -f "$zip"
-python3 - "$zip" "dist/$id.$ext" "$id.$ext" <<'PY'
+py=$(command -v python3 || command -v python)   # Windows runners only have `python`
+"$py" - "$zip" "dist/$id.$ext" "$id.$ext" <<'PY'
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as z:
     z.write(sys.argv[2], sys.argv[3])

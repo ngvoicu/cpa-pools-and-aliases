@@ -10,14 +10,7 @@ Devin has `devin/claude-opus-5-5`, Claude Code has `claude-opus-5-5`, an API key
 Pick a model and every source that offers it joins. Clients ask for `claude-opus-5-5` and CPA spreads
 requests across all members, while your Routing tiers (Preferred → Fallback 1 → …) still decide the order.
 
-```
-┌ claude-opus-5-5 ──────────────────── ✕ ┐   Models (drag onto a pool)
-│ 5 sources                 Switch to… ▾ │   ▾ Claude  gabriel@…      claude-opus-5-5 …
-│ claude-opus-5-5  DIRECT  Claude · …    │   ▾ Devin   gabriel@…      devin/claude-opus-5-5 …
-│ claude-opus-5-5  DIRECT  API key c-1   │   ▾ Claude API key claude-1 …
-│ devin/claude-opus-5-5    Devin · …   ✕ │
-└────────────────────────────────────────┘
-```
+![Pools page](assets/screenshot.png)
 
 ## How it works
 
@@ -45,8 +38,6 @@ requests across all members, while your Routing tiers (Preferred → Fallback 1 
   of model ids. Aliases for other names are never shown or changed.
 - Every save shows a review of the exact changes first. Deleting a pool removes only the aliases it created;
   sources that serve the model directly keep serving it.
-- Pools from v0.4 and earlier had their own names (`zeus`). The page renames them to their model id and
-  removes the old names; review and save once. Clients that asked for the old name must use the model id.
 
 Where a pool member is saved:
 
@@ -62,7 +53,7 @@ Where a pool member is saved:
 
 ## Install
 
-### From the plugin store (once listed)
+### From the plugin store
 
 Console → **Plugin Store** → *Pools and Aliases* → Install. Then enable it (see below).
 
@@ -115,22 +106,22 @@ After `make install`, restart CPA so it loads the new library. To update a runni
 (a restart drops session affinity, and with it your prompt caches), install a versioned copy and pin it:
 
 ```bash
-cp dist/cpa-pools-and-aliases.dylib ~/.cli-proxy-api/plugins/cpa-pools-and-aliases-v0.5.1.dylib
-# then in the CPA config:  plugins.configs.cpa-pools-and-aliases.version: "0.5.1"
+cp dist/cpa-pools-and-aliases.dylib ~/.cli-proxy-api/plugins/cpa-pools-and-aliases-v1.0.1.dylib
+# then in the CPA config:  plugins.configs.cpa-pools-and-aliases.version: "1.0.1"
 ```
 
 CPA hot-reloads the plugin as soon as it sees the config change. The plugin store does the same.
 
 ## Release
 
-1. Bump `version` in `Cargo.toml` (for example `0.3.0`) and commit.
-2. `git tag v0.3.0 && git push --tags`
+1. Bump `version` in `Cargo.toml` (for example `1.0.1`), add a `CHANGELOG.md` entry and commit.
+2. `git tag v1.0.1 && git push --tags`
 
 GitHub Actions builds darwin/arm64, darwin/amd64, linux/amd64, linux/arm64 and windows/amd64. It
 then publishes the release with the asset layout the CPA plugin store expects:
 
 ```
-cpa-pools-and-aliases_0.2.0_darwin_arm64.zip   (contains cpa-pools-and-aliases.dylib at the root)
+cpa-pools-and-aliases_1.0.1_darwin_arm64.zip   (contains cpa-pools-and-aliases.dylib at the root)
 …
 checksums.txt                                   (sha256sum format)
 ```
@@ -145,7 +136,7 @@ need to submit the entry once:
 1. Publish a release (see above) so the zips and `checksums.txt` exist.
 2. Fork the store repo and add the contents of [`store/registry-entry.json`](store/registry-entry.json)
    to the `plugins` array in `registry.json`.
-3. Open a PR that includes the repository URL, the release tag (`v0.1.0`), a link to the release
+3. Open a PR that includes the repository URL, the release tag (`v1.0.0`), a link to the release
    assets, and a one-line description.
 
 After it's merged, new releases ship automatically. There's nothing to change in the store.
