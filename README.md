@@ -31,6 +31,11 @@ requests across all members, while your Routing tiers (Preferred → Fallback 1 
 - **No provider names.** In every model list CPA serves (OpenAI, Claude, Gemini and Codex-style clients such
   as pi) a pool shows as its plain model id, never as `Claude Opus 5.5 (Devin)`. Regular models keep their
   own names. Pools have no separate names: the model id is what clients send, so that's what they see.
+- **New sources join automatically.** Every account or key that offers a pool's model is a member. Add a
+  new account or key (for example OpenRouter, whose `anthropic/claude-opus-5.5` matches `claude-opus-5-5`)
+  and the next time you open the page it is added to the matching pools, ready for review and save.
+  Remove a member and it stays out (`skip` in the plugin config) until you add it back. API-key groups
+  without a key are ignored.
 - **Switch to…** moves every member to another model in one save, e.g. when Opus 6 ships. Members that
   don't offer the new model leave the pool.
 - **Clients see: Pools and models / Pools only.** With *Pools only*, model lists show just your pools; all
@@ -110,8 +115,8 @@ After `make install`, restart CPA so it loads the new library. To update a runni
 (a restart drops session affinity, and with it your prompt caches), install a versioned copy and pin it:
 
 ```bash
-cp dist/cpa-pools-and-aliases.dylib ~/.cli-proxy-api/plugins/cpa-pools-and-aliases-v0.5.0.dylib
-# then in the CPA config:  plugins.configs.cpa-pools-and-aliases.version: "0.5.0"
+cp dist/cpa-pools-and-aliases.dylib ~/.cli-proxy-api/plugins/cpa-pools-and-aliases-v0.5.1.dylib
+# then in the CPA config:  plugins.configs.cpa-pools-and-aliases.version: "0.5.1"
 ```
 
 CPA hot-reloads the plugin as soon as it sees the config change. The plugin store does the same.

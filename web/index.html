@@ -169,6 +169,7 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
       <a class="btn ghost hidden" id="newtab" href="#" target="_blank" rel="noopener" title="Open in a new tab">↗</a>
       <button class="btn ghost hidden" id="logout" title="Forget the management key">Disconnect</button>
     </div>
+    <div id="notices"></div>
     <div class="layout">
       <div id="pools"></div>
       <aside class="card side">
@@ -333,7 +334,7 @@ async function load() {
     if (typeof json === "string") { try { json = JSON.parse(json); } catch (_) { json = null; } }
     const p = lc(f.provider || f.type);
     sources.push({
-      id: "auth:" + f.name, kind: "auth", provider: p, file: f.name,
+      id: "auth:" + f.name, ref: "auth:" + f.name, kind: "auth", provider: p, file: f.name,
       label: f.email || f.label || f.account || f.name.replace(/\.json$/i, ""),
       disabled: !!f.disabled,
       entries: clone((json && (json.model_aliases || json["model-aliases"])) || []),
@@ -341,6 +342,8 @@ async function load() {
       globals: clone(globalAliases[p] || globalAliases[Object.keys(globalAliases).find((k) => lc(k) === p)] || []),
     });
   }));
+  const keyless = [];
+  const hasKey = (k) => !!(k && typeof k["api-key"] === "string" && k["api-key"].trim());
   for (const [p0, groups] of Object.entries(apiKeys)) {
     if (!Array.isArray(groups)) continue;
     const p = lc(p0);
@@ -348,13 +351,15 @@ async function load() {
       if (!g || typeof g !== "object") return;
       const keys = Array.isArray(g.keys) ? g.keys : [];
       const name = g.name || `${p}-${gi + 1}`;
-      const keyLevel = keys.map((k, ki) => ({ k, ki })).filter(({ k }) => k && Array.isArray(k.models));
+      // a group without any API key can't serve anything; don't offer it as a pool member
+      if (!keys.some(hasKey) && !hasKey(g)) { keyless.push(`${name} (${prov(p).label})`); return; }
+      const keyLevel = keys.map((k, ki) => ({ k, ki })).filter(({ k }) => hasKey(k) && Array.isArray(k.models));
       if (Array.isArray(g.models) || keyLevel.length === 0) {
-        sources.push({ id: `apikey:${p0}:${gi}`, kind: "apikey", provider: p, providerKey: p0, gi, ki: null,
+        sources.push({ id: `apikey:${p0}:${gi}`, ref: `key:${p0}/${name}`, kind: "apikey", provider: p, providerKey: p0, gi, ki: null,
           label: name, entries: clone(g.models || []), hadList: Array.isArray(g.models) && g.models.length > 0 });
       }
       for (const { k, ki } of keyLevel) {
-        sources.push({ id: `apikey:${p0}:${gi}:${ki}`, kind: "apikey", provider: p, providerKey: p0, gi, ki,
+        sources.push({ id: `apikey:${p0}:${gi}:${ki}`, ref: `key:${p0}/${name}#${ki + 1}`, kind: "apikey", provider: p, providerKey: p0, gi, ki,
           label: name + (keys.length > 1 ? ` · key ${ki + 1}` : ""), entries: clone(k.models || []), hadList: k.models.length > 0 });
       }
     });
@@ -364,11 +369,14 @@ async function load() {
   for (const s of sources) s.options = optionsFor(s, catalogs);
 
   const poolsOnly = !!(pluginCfg && pluginCfg["pools-only"] === true);
+  const skip = (pluginCfg && pluginCfg.skip && typeof pluginCfg.skip === "object") ? pluginCfg.skip : {};
   S = { config, pluginCfg: pluginCfg || {}, sources, pools: [], nextId: 0, catalogs, registered,
-    poolsOnly, origPoolsOnly: poolsOnly };
+    poolsOnly, origPoolsOnly: poolsOnly, skip, keyless };
   S.models = modelCatalog();
   S.pools = registered.map((r) => readPool(r));
   migrateLegacy();
+  const joined = S.pools.reduce((n, p) => n + autoJoin(p), 0);
+  if (joined) toast(`${joined} new source${joined === 1 ? "" : "s"} joined your pools. Review and save to apply.`);
   show("loading", false); show("app", true);
   render();
 }
@@ -423,8 +431,10 @@ function readPool(r) {
     const e = s.entries.find((x) => isAliasEntry(x) && lc(x.alias) === lc(name));
     if (e) members.set(s.id, e.name);
   }
+  const sk = Array.isArray(S.skip[name]) ? S.skip[name].filter((x) => typeof x === "string") : [];
   return { id: "p" + (S.nextId++), name, origName: name, oldLabel: r.label && r.label !== name ? r.label : "",
-    members, origMembers: new Map(members), deleted: false, isNew: false, error: null };
+    members, origMembers: new Map(members), deleted: false, isNew: false, error: null,
+    skip: new Set(sk), origSkip: new Set(sk), auto: new Set() };
 }
 
 // Pools from v0.3 and earlier have free names ("zeus"). Rename them to their model id. Pools that mix models or have no members can't be converted automatically.
@@ -444,6 +454,26 @@ function migrateLegacy() {
     } else if (!keys.size) p.error = "This pool has no models. Pick one with “Switch to…”, or delete it.";
     else p.error = `This pool mixes ${keys.size} different models. A pool holds one model: remove members until one model is left, or delete it.`;
   }
+}
+
+// Every source that offers the pool's model is a member unless it was removed from the pool before
+// (plugins.configs.<id>.skip). New accounts and keys therefore join on the next visit to this page.
+function autoJoin(p) {
+  if (p.deleted || p.error) return 0;
+  const key = mkey(p.name), cur = members(p);
+  let n = 0;
+  for (const s of S.sources) {
+    if (cur.has(s.id) || p.skip.has(s.ref)) continue;
+    const o = optionFor(s, key, p.name);
+    if (!o || isDirect(p, o.name)) continue;
+    p.members.set(s.id, o.name); p.auto.add(s.id); n++;
+  }
+  return n;
+}
+function skipMap() {
+  const out = {};
+  for (const p of S.pools) if (!p.deleted && p.skip.size) out[p.name] = [...p.skip].sort();
+  return out;
 }
 
 // Effective members: the pool's own entries plus every source that serves the exact model id
@@ -501,7 +531,7 @@ function plan() {
       dirty = true;
       if (b && !a) removedModels.push(b);
       if (!b && !needsWrite) changes.push({ t: "mod", text: `~ ${p.name}: drop old name “${[...old].find((n) => (s.entries || []).some((e) => lc(e["display-name"]) === n)) || ""}”`, where });
-      else if (!b) changes.push({ t: "add", text: `+ ${p.name} ← ${a}`, where });
+      else if (!b) changes.push({ t: "add", text: `+ ${p.name} ← ${a}${p.auto.has(s.id) ? "  (new source)" : ""}`, where });
       else if (!a) changes.push({ t: "del", text: `− ${p.origName} ← ${b}`, where });
       else if (b !== a || renamed) changes.push({ t: "mod", text: `~ ${p.origName}${renamed ? " ⇒ " + p.name : ""}: ${b}${b !== a ? " → " + a : ""}${isDirect(p, a) ? "  (direct)" : ""}`, where });
       else changes.push({ t: "mod", text: `~ ${p.name}: drop old name`, where });
@@ -558,17 +588,36 @@ function plan() {
     "Anything that asked for the old name (scripts, saved client settings) must switch to the model id.");
   if (old.size && !legacy.length) notes.push("Pool names are gone: clients see each pool as its model id. " +
     "The old names (" + [...old].join(", ") + ") are removed from the pool entries.");
+  const skipNow = skipMap();
+  const skipChanged = JSON.stringify(skipNow) !== JSON.stringify(Object.fromEntries(Object.entries(S.skip).filter(([, v]) => Array.isArray(v) && v.length).map(([k, v]) => [k, [...v].sort()])));
+  for (const p of S.pools) {
+    if (p.deleted) continue;
+    for (const ref of p.skip) if (!p.origSkip.has(ref)) {
+      const src = S.sources.find((x) => x.ref === ref);
+      if (src && !changes.some((c) => c.where === srcLabel(src) && c.text.startsWith(`− ${p.origName || p.name} `)))
+        changes.push({ t: "mod", text: `~ ${p.name}: leave out`, where: srcLabel(src) });
+    }
+  }
+  if (skipChanged && !changes.length) changes.push({ t: "mod", text: "~ left-out sources", where: "" });
   const seeChanged = S.poolsOnly !== S.origPoolsOnly;
   if (seeChanged) {
     changes.push({ t: "mod", text: `~ clients see: ${S.poolsOnly ? "pools only" : "pools and models"}`, where: "" });
     if (S.poolsOnly) notes.push("Pools only hides every other model from model lists. Clients that already know a model's " +
       "name can still use it; to retire a model completely, remove or exclude it in CPA.");
   }
-  return { changes, notes, touched, names, registryChanged, seeChanged, errors };
+  return { changes, notes, touched, names, registryChanged, seeChanged, errors, skipNow, skipChanged };
 }
 
 // ------------------------------------------------------------------ render
+function renderNotices() {
+  const box = $("notices");
+  box.replaceChildren();
+  if (S.keyless.length) box.append(h("div", { class: "note", style: "margin:0 0 12px" },
+    `Ignored ${S.keyless.join(", ")}: no API key, so it can't serve anything. Add a key or delete the group in the console.`));
+}
+
 function render() {
+  renderNotices();
   renderNewModel();
   renderSee();
   renderPools();
@@ -663,11 +712,13 @@ function poolCard(p) {
       direct
         ? h("span", { class: "lock", title: `${s.label} serves ${p.name} under that exact name, so CPA always includes it. Exclude the model on that account to leave it out.` }, "always in")
         : h("button", { class: "btn ghost danger", title: "Remove from pool", disabled: p.deleted,
-            onclick: () => { p.members.delete(sid); render(); } }, "✕")));
+            onclick: () => { p.members.delete(sid); p.auto.delete(sid); p.skip.add(s.ref); render(); } }, "✕")));
   }
   card.append(list);
   const removed = [...p.origMembers.keys()].filter((sid) => !mem.has(sid)).map(srcById).filter(Boolean);
   if (removed.length && !p.deleted) card.append(h("div", { class: "removed" }, "removed: " + removed.map((s) => s.label).join(", ")));
+  const left = [...p.skip].map((ref) => S.sources.find((x) => x.ref === ref)).filter((x) => x && !mem.has(x.id) && !removed.includes(x));
+  if (left.length && !p.deleted) card.append(h("div", { class: "hint", style: "margin-top:6px" }, "left out: " + left.map((x) => x.label).join(", ")));
 
   if (!p.deleted && !p.error) {
     const key = mkey(p.name);
@@ -741,6 +792,7 @@ function addMember(p, sid, model) {
   if (cur && isDirect(p, cur)) { toast(`${srcLabel(s)} already serves ${p.name} directly.`); return; }
   if (cur === model) return;
   p.members.set(sid, model);
+  p.skip.delete(s.ref);
   render();
 }
 
@@ -750,12 +802,15 @@ function switchModel(p, key) {
   const before = members(p);
   const next = new Map();
   let dropped = 0;
-  for (const sid of before.keys()) {
-    const o = optionFor(srcById(sid), key, e.id);
-    if (o) next.set(sid, o.name); else dropped++;
+  for (const sid of before.keys()) if (!optionFor(srcById(sid), key, e.id)) dropped++;
+  for (const s of S.sources) {
+    if (p.skip.has(s.ref) && !before.has(s.id)) continue;
+    const o = optionFor(s, key, e.id);
+    if (o) next.set(s.id, o.name);
   }
-  if (p.error && !before.size) for (const sid of e.sources) next.set(sid, optionFor(srcById(sid), key, e.id).name);
   const oldName = p.name;
+  const sk = S.skip[oldName];
+  if (sk) { S.skip = { ...S.skip }; delete S.skip[oldName]; S.skip[e.id] = sk; }
   p.name = e.id;
   p.members = new Map([...next].filter(([, m]) => !isDirect(p, m)));
   p.error = null;
@@ -769,7 +824,7 @@ function addPool() {
   const e = S.models.get(key);
   if (!e) { toast("Pick a model first", true); return; }
   if (poolOf(key)) { toast(`${e.id} already has a pool`, true); return; }
-  const p = { id: "p" + (S.nextId++), name: e.id, origName: null,
+  const p = { id: "p" + (S.nextId++), name: e.id, origName: null, skip: new Set(), origSkip: new Set(), auto: new Set(),
     members: new Map(), origMembers: new Map(), deleted: false, isNew: true, error: null };
   for (const sid of e.sources) {
     const o = optionFor(srcById(sid), key, e.id);
@@ -790,7 +845,7 @@ function openReview() {
 }
 
 async function save() {
-  const { touched, names, registryChanged, seeChanged } = plan();
+  const { touched, names, registryChanged, seeChanged, skipNow, skipChanged } = plan();
   const btn = $("confirmSave");
   btn.disabled = true; btn.replaceChildren(h("span", { class: "spin" }), " Saving…");
   const errors = [];
@@ -815,6 +870,9 @@ async function save() {
     // pool list last, so a failed alias write never leaves pools CPA doesn't know about
     if (registryChanged && errors.length === 0) {
       try { await api("PUT", `/config/plugins/configs/${PLUGIN_ID}/pools`, names); } catch (e) { errors.push(e.message); }
+    }
+    if (skipChanged && errors.length === 0) {
+      try { await api("PUT", `/config/plugins/configs/${PLUGIN_ID}/skip`, skipNow); } catch (e) { errors.push(e.message); }
     }
     if (seeChanged && errors.length === 0) {
       try { await api("PUT", `/config/plugins/configs/${PLUGIN_ID}/pools-only`, S.poolsOnly); } catch (e) { errors.push(e.message); }
