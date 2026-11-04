@@ -1,97 +1,119 @@
+<div align="center">
+
+<img src="assets/logo.svg" width="96" alt="Pools and Aliases logo">
+
 # Pools and Aliases for CLIProxyAPI
 
-<img src="assets/logo.svg" width="64" align="right" alt="">
+**One model, every subscription.** Pool every account and API key that serves the same model under its plain model id.
 
-A [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA) plugin that adds a **Pools** page to the
-management console.
+[![Release](https://img.shields.io/github/v/release/ngvoicu/cpa-pools-and-aliases?color=3ecf8e)](https://github.com/ngvoicu/cpa-pools-and-aliases/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/ngvoicu/cpa-pools-and-aliases/build.yml?branch=main&label=build)](https://github.com/ngvoicu/cpa-pools-and-aliases/actions/workflows/build.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![CLIProxyAPI plugin](https://img.shields.io/badge/CLIProxyAPI-plugin-111114)](https://github.com/router-for-me/CLIProxyAPI)
 
-A pool is **one model served by several accounts or keys**. Every source names the same model differently:
-Devin has `devin/claude-opus-5-5`, Claude Code has `claude-opus-5-5`, an API key has whatever you configured.
-Pick a model and every source that offers it joins. Clients ask for `claude-opus-5-5` and CPA spreads
-requests across all members, while your Routing tiers (Preferred → Fallback 1 → …) still decide the order.
+[Read the article](https://ngvoicu.dev/articles/cliproxyapi-model-pools/) ·
+[Download](https://github.com/ngvoicu/cpa-pools-and-aliases/releases/latest) ·
+[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)
 
-![Pools page](assets/screenshot.png)
+<img src="assets/streams.webp" width="640" alt="Ink-and-watercolour painting: five small streams in different colours run down from separate springs and flow into one calm green pool.">
+
+</div>
+
+## Why
+
+[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA) runs on your machine and serves your AI
+subscriptions (Claude Code, ChatGPT Codex, Antigravity, Grok Build, Muse Code, Devin and others) and API keys as
+one local API in the OpenAI, Claude and Gemini formats. Any tool can then use them: Claude Code, Codex, pi, your own
+scripts.
+
+CPA spreads requests across every account that serves a model **under the same name**. The catch: every provider
+names the same model differently.
+
+```mermaid
+flowchart LR
+  A["Claude login<br/>claude-opus-5-5"] --> P
+  B["Anthropic API key<br/>claude-opus-5-5"] --> P
+  C["Devin<br/>devin/claude-opus-5-5"] --> P
+  D["OpenRouter<br/>anthropic/claude-opus-5.5"] --> P
+  P(("Pool<br/>claude-opus-5-5"))
+  P --> T["Your tools ask for claude-opus-5-5,<br/>CPA spreads it across all four"]
+```
+
+CPA has aliases to fix that, but they live in three places (each login's credential file, each API key's model
+list, a global section per provider), and editing them by hand goes wrong fast. This plugin gives you one page
+for it: pick a model, and every account and key that offers it joins.
+
+The full story, with screenshots: **[Pools for CLIProxyAPI](https://ngvoicu.dev/articles/cliproxyapi-model-pools/)**.
+
+## What you get
+
+![The Pools page in the CLIProxyAPI console](assets/screenshot.png)
+
+- **One model per pool.** A pool's name is the model's own id, so your tools price it, size its context and offer
+  its reasoning levels as that model. Failover moves to another member, never to another model.
+- **Matching across providers.** The vendor prefix, case and punctuation are ignored: `devin/gpt-6-1-sol` and
+  `gpt-6.1-sol` land in the same pool. Dropping a different model on a pool is refused.
+- **New accounts join on their own.** Add an account or key, open the page, and it is already in the pools for its
+  models, ready to save. Remove a member and it stays out.
+- **Clean model lists.** In every list CPA serves (OpenAI, Claude, Gemini and Codex-style clients such as pi) a pool
+  shows as its plain id, never as `Claude Opus 5.5 (Devin)`.
+- **Pools only.** One switch hides every model that isn't in a pool from model lists. Requests by name still work.
+- **Switch to…** moves a whole pool to a new model version in one save.
+- **Review before save.** Every save lists the exact changes, account by account.
+- **Nothing in the request path.** Pools are saved as CPA's own aliases. Remove the plugin and your pools keep working.
+
+## Quick start
+
+Requires CPA 8 with plugins enabled (tested on 8.0.50 and 8.0.53).
+
+1. **Install.** Console → **Plugin Store** → *Pools and Aliases* → Install. Or download the zip for your system from
+   [Releases](https://github.com/ngvoicu/cpa-pools-and-aliases/releases/latest) and put the library inside it into
+   your plugins folder.
+2. **Enable** it in the CPA config and restart CPA once:
+
+   ```yaml
+   plugins:
+     enabled: true
+     dir: "~/.cli-proxy-api/plugins"
+     configs:
+       cpa-pools-and-aliases:
+         enabled: true
+   ```
+
+3. **Open** *Plugins → Pools and Aliases* in the console (or `http://<cpa>/v0/resource/plugins/cpa-pools-and-aliases/ui`).
+4. **Create a pool:** pick a model at the top, press *Create pool*, review, save. CPA applies it without a restart.
+
+Your tools don't change: they keep asking for `claude-opus-5-5`, and CPA now spreads those requests across the pool.
 
 ## How it works
 
-- **One model per pool.** A pool's CPA name is the model's own id (`claude-opus-5-5`), so clients price it,
-  size its context and pick reasoning levels as that model, and failover never silently changes models.
-  Sources match across providers by ignoring the `vendor/` prefix, case and punctuation
-  (`devin/gpt-6-1-sol` = `gpt-6.1-sol`). Dropping a different model on a pool is refused.
-- **Pools are CPA's own model aliases.** Members that already serve the exact id are in the pool
-  automatically (marked *direct*); others get an alias `<their model> → <pool id>`. The plugin doesn't
-  route or schedule anything. Disable it and your pools keep working.
-- **No provider names.** In every model list CPA serves (OpenAI, Claude, Gemini and Codex-style clients such
-  as pi) a pool shows as its plain model id, never as `Claude Opus 5.5 (Devin)`. Regular models keep their
-  own names. Pools have no separate names: the model id is what clients send, so that's what they see.
-- **New sources join automatically.** Every account or key that offers a pool's model is a member. Add a
-  new account or key (for example OpenRouter, whose `anthropic/claude-opus-5.5` matches `claude-opus-5-5`)
-  and the next time you open the page it is added to the matching pools, ready for review and save.
-  Remove a member and it stays out (`skip` in the plugin config) until you add it back. API-key groups
-  without a key are ignored.
-- **Switch to…** moves every member to another model in one save, e.g. when Opus 6 ships. Members that
-  don't offer the new model leave the pool.
-- **Clients see: Pools and models / Pools only.** With *Pools only*, model lists show just your pools; all
-  other models disappear from client pickers. It only hides them: a client that asks for a hidden model by
-  name still gets it. Stored as `pools-only: true` in the plugin config.
-- **Only its own pools.** The pool list is kept in `plugins.configs.cpa-pools-and-aliases.pools` as a list
-  of model ids. Aliases for other names are never shown or changed.
-- Every save shows a review of the exact changes first. Deleting a pool removes only the aliases it created;
-  sources that serve the model directly keep serving it.
+Members that already serve the exact model id are in the pool automatically (shown as *direct*); the others get an
+alias `<their model> → <pool id>`. The plugin itself only renders the page and cleans model-list display names.
 
-Where a pool member is saved:
-
-| Source | Saved to | API used |
+| What | Saved to | Management API |
 |---|---|---|
-| Account (OAuth login) | `model_aliases` in that credential's JSON file | `PATCH /v8/management/credentials/fields` |
-| API key | `api-keys.<provider>[group](.keys[i]).models[]` | `PUT /v8/management/config/api-keys/<provider>` |
-| Pool list | `plugins.configs.cpa-pools-and-aliases.pools` | `PUT /v8/management/config/plugins/configs/cpa-pools-and-aliases/pools` |
+| Account member (OAuth login) | `model_aliases` in that credential's JSON file | `PATCH /v8/management/credentials/fields` |
+| API-key member | `api-keys.<provider>[group](.keys[i]).models[]` | `PUT /v8/management/config/api-keys/<provider>` |
+| Pool list | `plugins.configs.cpa-pools-and-aliases.pools` (model ids) | `PUT /v8/management/config/plugins/configs/cpa-pools-and-aliases/pools` |
+| Removed members | `plugins.configs.cpa-pools-and-aliases.skip` | same, `/skip` |
+| *Pools only* | `plugins.configs.cpa-pools-and-aliases.pools-only` | same, `/pools-only` |
 
-> **API keys without a model list** serve every default model of their provider. Adding a list makes them
-> serve *only* the listed models, so the first pool member on such a key also writes the provider's default
-> models into the list. The review dialog warns you when this happens.
+Aliases for names that aren't pools are never shown or changed. Deleting a pool removes only the aliases it
+created; accounts that serve the model directly keep serving it.
 
-## Install
+### Good to know
 
-### From the plugin store
+- **API keys without a model list** serve every default model of their provider. Adding a pool member writes those
+  defaults into the list so the key keeps serving them; the review tells you.
+- **Direct members can't be removed here**, because CPA includes them automatically. Exclude the model on that
+  account in CPA instead.
+- **Prompt caches belong to accounts.** A request that moves to another member starts cold; turn on CPA's session
+  affinity so a conversation stays on one account.
+- **The management key.** The page uses the normal `/v8/management` API. If you saved your key in the console
+  (*Remember password*) the page reuses it; otherwise it asks once and keeps it in the tab (or on the device if you
+  choose). The page is a static resource with no secrets; every write needs the key.
 
-Console → **Plugin Store** → *Pools and Aliases* → Install. Then enable it (see below).
-
-### Manually
-
-Download the zip for your platform from [Releases](https://github.com/ngvoicu/cpa-pools-and-aliases/releases)
-and put the library from inside it into your plugins directory. Or build it yourself:
-
-```bash
-make install PLUGINS_DIR=~/.cli-proxy-api/plugins
-```
-
-### Enable
-
-```yaml
-plugins:
-  enabled: true
-  dir: "~/.cli-proxy-api/plugins"
-  configs:
-    cpa-pools-and-aliases:
-      enabled: true
-```
-
-Restart CPA. **Pools and Aliases** then appears under *Plugins* in the console sidebar. The page also
-opens directly at `http://<cpa>/v0/resource/plugins/cpa-pools-and-aliases/ui`.
-
-## The management key
-
-The page calls the normal `/v8/management` API, so it needs your management key:
-
-- If you logged in to the console with **Remember password**, the page reuses that key automatically.
-- Otherwise it asks once. The key stays in this browser tab, or on the device if you tick
-  *Remember on this device*.
-
-The page itself is a static resource with no secrets in it. CPA serves plugin resources without
-authentication, and every write still requires the management key.
-
-## Build
+## Development
 
 Rust (stable). The page in `web/index.html` is embedded into the library at compile time.
 
@@ -102,45 +124,24 @@ make install PLUGINS_DIR=~/.cli-proxy-api/plugins
 make package TARGET=aarch64-apple-darwin GOOS=darwin GOARCH=arm64   # release zip
 ```
 
-After `make install`, restart CPA so it loads the new library. To update a running CPA **without a restart**
-(a restart drops session affinity, and with it your prompt caches), install a versioned copy and pin it:
+After `make install`, restart CPA. To update a running CPA **without a restart** (a restart drops session affinity,
+and with it your prompt caches), install a versioned copy and pin it; CPA hot-reloads the plugin:
 
 ```bash
 cp dist/cpa-pools-and-aliases.dylib ~/.cli-proxy-api/plugins/cpa-pools-and-aliases-v1.0.1.dylib
-# then in the CPA config:  plugins.configs.cpa-pools-and-aliases.version: "1.0.1"
+# CPA config:  plugins.configs.cpa-pools-and-aliases.version: "1.0.1"
 ```
 
-CPA hot-reloads the plugin as soon as it sees the config change. The plugin store does the same.
+### Release
 
-## Release
-
-1. Bump `version` in `Cargo.toml` (for example `1.0.1`), add a `CHANGELOG.md` entry and commit.
+1. Bump `version` in `Cargo.toml`, add a `CHANGELOG.md` entry, commit.
 2. `git tag v1.0.1 && git push --tags`
 
-GitHub Actions builds darwin/arm64, darwin/amd64, linux/amd64, linux/arm64 and windows/amd64. It
-then publishes the release with the asset layout the CPA plugin store expects:
-
-```
-cpa-pools-and-aliases_1.0.1_darwin_arm64.zip   (contains cpa-pools-and-aliases.dylib at the root)
-…
-checksums.txt                                   (sha256sum format)
-```
-
-## Publishing to the CPA plugin store
-
-The store is just a `registry.json` in
-[router-for-me/CLIProxyAPI-Plugins-Store](https://github.com/router-for-me/CLIProxyAPI-Plugins-Store).
-CPA reads your repository's **latest GitHub release** to install and update the plugin, so you only
-need to submit the entry once:
-
-1. Publish a release (see above) so the zips and `checksums.txt` exist.
-2. Fork the store repo and add the contents of [`store/registry-entry.json`](store/registry-entry.json)
-   to the `plugins` array in `registry.json`.
-3. Open a PR that includes the repository URL, the release tag (`v1.0.0`), a link to the release
-   assets, and a one-line description.
-
-After it's merged, new releases ship automatically. There's nothing to change in the store.
+Every push runs the tests; a `v*` tag builds darwin arm64/amd64, linux amd64/arm64 and windows amd64 and publishes
+the release in the layout the CPA plugin store expects (`<id>_<version>_<goos>_<goarch>.zip` with the library at the
+root, plus `checksums.txt`). The store reads the latest release, so new versions need no store change; the entry
+itself is in [`store/registry-entry.json`](store/registry-entry.json).
 
 ## License
 
-MIT
+[MIT](LICENSE) · Made by [Gabriel Voicu](https://ngvoicu.dev)
