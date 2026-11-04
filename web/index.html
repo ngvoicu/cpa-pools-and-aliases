@@ -379,11 +379,19 @@ function readPool(name, id, sources, savedLabel) {
     if (!e) continue;
     members.set(s.id, e.name);
     labels.set(s.id, typeof e["display-name"] === "string" ? e["display-name"] : "");
-    if (s.kind === "auth") fork = fork || e.fork === true;
+    const keeps = s.kind === "auth" ? e.fork === true : hasIdentity(s.entries, e.name);
+    fork = fork || keeps;
   }
   const label = savedLabel || [...labels.values()].find(Boolean) || name;
   return { id, name, origName: name, label, fork: fork !== false, origFork: fork !== false,
     members, origMembers: new Map(members), labels, deleted: false, isNew: false };
+}
+// An API key serves a model under its real name only while its list has an entry with alias == name.
+function isIdentity(e, model) {
+  return e && e.name && lc(e.name) === lc(model) && lc(e.alias || e.name) === lc(model);
+}
+function hasIdentity(entries, model) {
+  return (Array.isArray(entries) ? entries : []).some((e) => isIdentity(e, model));
 }
 // What clients see as the model's name. Every member carries the same display-name, otherwise
 // CPA shows whichever member's own name it registered last (e.g. "Claude Opus 5.5 (Devin)").
@@ -409,7 +417,7 @@ function plan() {
       const b = p.origName ? p.origMembers.get(s.id) : undefined;
       const a = p.deleted ? undefined : p.members.get(s.id);
       const renamed = !!p.origName && p.origName !== p.name;
-      const forkChanged = s.kind === "auth" && p.fork !== p.origFork;
+      const forkChanged = p.fork !== p.origFork;
       const labelChanged = !!a && !!b && (p.labels && p.labels.get(s.id) || "") !== poolLabel(p);
       if (!b && !a) continue;
       if (b === a && !renamed && !forkChanged && !labelChanged) continue;
@@ -433,8 +441,29 @@ function plan() {
       if (s.kind === "auth") { if (pool.fork) entry.fork = true; else delete entry.fork; }
       entries.push(entry);
     }
+    if (s.kind === "apikey") {
+      // "keep original names" off: the key stops listing the real model, so it only answers to the pool.
+      // Turning it back on, changing the member, removing it or deleting the pool lists the real model again.
+      for (const p of S.pools) {
+        const b = p.origName ? p.origMembers.get(s.id) : undefined;
+        if (!b || p.origFork || hasIdentity(s.entries, b)) continue; // this pool wasn't hiding b
+        const a = p.deleted ? undefined : p.members.get(s.id);
+        const stillHidden = a && lc(a) === lc(b) && !p.fork;
+        if (!stillHidden && !hasIdentity(entries, b)) entries.unshift({ name: b, alias: b });
+      }
+      for (const [, { pool, model }] of after) {
+        if (pool.fork) continue;
+        const hidden = entries.filter((e) => isIdentity(e, model));
+        if (hidden.length) {
+          entries = entries.filter((e) => !isIdentity(e, model));
+          if (hidden.some((e) => e["display-name"])) notes.push(`${s.label}: ${model} is no longer listed under its own name; ` +
+            `its display name (${hidden.find((e) => e["display-name"])["display-name"]}) is dropped and comes back as plain ${model} if you turn it on again.`);
+        }
+      }
+    }
     if (s.kind === "apikey" && !s.hadList && after.size) {
-      const seed = (S.catalogs[s.provider] || []).filter((m) => !entries.some((e) => lc(e.name) === lc(m) && lc(e.alias || e.name) === lc(m)))
+      const hiddenModels = new Set([...after.values()].filter(({ pool }) => !pool.fork).map(({ model }) => lc(model)));
+      const seed = (S.catalogs[s.provider] || []).filter((m) => !hiddenModels.has(lc(m)) && !hasIdentity(entries, m))
         .map((m) => ({ name: m, alias: m }));
       entries = [...seed, ...entries];
       notes.push(`${s.label}: this key had no model list, so it served every default ${prov(s.provider).label} model. ` +
@@ -511,7 +540,7 @@ function poolCard(p) {
       onchange: (ev) => { p.label = ev.target.value.trim() || p.name; render(); } })));
   card.append(h("div", { class: "pool-meta" },
     h("span", {}, `${p.members.size} model${p.members.size === 1 ? "" : "s"}`),
-    h("label", { title: "Accounts keep showing their real model names next to the pool name (CPA's fork option). API keys always keep them." },
+    h("label", { title: "Members keep answering to their real model names next to the pool name. Off: the pool name is the only way to reach them." },
       h("input", { type: "checkbox", checked: p.fork, disabled: p.deleted, onchange: (ev) => { p.fork = ev.target.checked; render(); } }),
       "keep original names")));
 
