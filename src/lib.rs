@@ -5,7 +5,7 @@
 //! 2. Cleans pool entries in model-list responses (/v1/models for OpenAI, Claude, Gemini and
 //!    Codex-style clients): a pool is one name over many accounts, so its display name must not
 //!    carry whichever member's provider/harness label CPA happened to pick, e.g.
-//!    "Claude Opus 5.5 (Devin)". Pool entries get the pool's own label instead.
+//!    "Claude Opus 5.5 (Devin)". Pool entries show their plain model id instead.
 //!
 //! Pools come from the plugin's own config (plugins.configs.cpa-pools-and-aliases.pools), which
 //! CPA hands to the plugin on plugin.register / plugin.reconfigure.
@@ -122,7 +122,7 @@ fn error_envelope(code: &str, message: &str) -> Vec<u8> {
 
 #[derive(Clone, Default, Debug)]
 struct Settings {
-    /// lower-cased pool name -> label shown to clients
+    /// lower-cased pool id -> the id as configured, shown to clients as the model's display name
     pools: HashMap<String, String>,
     /// model lists show only the pools (requests for other models still work)
     pools_only: bool,
@@ -144,7 +144,8 @@ struct LifecycleRequest {
     config_yaml: Option<String>,
 }
 
-/// Plugin config: `pools: [zeus, ...]` or `pools: [{name: zeus, label: Zeus}, ...]`, plus `pools-only: bool`.
+/// Plugin config: `pools: [claude-opus-5-5, ...]` plus `pools-only: bool`. Older `{name, label}` entries
+/// are accepted; the label is ignored, since a pool always shows as its model id.
 fn parse_settings(yaml: &[u8]) -> Settings {
     let doc: serde_yaml::Value = match serde_yaml::from_slice(yaml) {
         Ok(v) => v,
@@ -163,19 +164,15 @@ fn parse_pools(doc: &serde_yaml::Value) -> HashMap<String, String> {
         None => return out,
     };
     for item in list {
-        let (name, label) = match item {
-            serde_yaml::Value::String(s) => (s.trim().to_string(), String::new()),
-            serde_yaml::Value::Mapping(_) => (
-                item.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string(),
-                item.get("label").and_then(|v| v.as_str()).unwrap_or("").trim().to_string(),
-            ),
+        let name = match item {
+            serde_yaml::Value::String(s) => s.trim().to_string(),
+            serde_yaml::Value::Mapping(_) => item.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string(),
             _ => continue,
         };
         if name.is_empty() {
             continue;
         }
-        let label = if label.is_empty() { name.clone() } else { label };
-        out.insert(name.to_lowercase(), label);
+        out.insert(name.to_lowercase(), name);
     }
     out
 }
@@ -330,7 +327,7 @@ mod tests {
     fn parses_strings_and_objects() {
         let t = table();
         assert_eq!(t.pools.get("zeus").map(String::as_str), Some("zeus"));
-        assert_eq!(t.pools.get("argon").map(String::as_str), Some("Argon Pool"));
+        assert_eq!(t.pools.get("argon").map(String::as_str), Some("argon"));
         assert!(!t.pools_only);
         assert!(parse_settings(b"pools-only: true\npools: [zeus]\n").pools_only);
     }
@@ -346,7 +343,7 @@ mod tests {
         let mut gemini = json!({"models":[{"name":"models/gemini-4"},{"name":"models/ARGON","displayName":"y"}],"nextPageToken":""});
         assert!(clean_model_list(&mut gemini, &t));
         assert_eq!(gemini["models"].as_array().unwrap().len(), 1);
-        assert_eq!(gemini["models"][0]["displayName"], "Argon Pool");
+        assert_eq!(gemini["models"][0]["displayName"], "argon");
         let mut openai = json!({"object":"list","data":[{"id":"zeus"},{"id":"claude-opus-5-5"},{"bogus":1}]});
         assert!(clean_model_list(&mut openai, &t));
         assert_eq!(openai["data"], json!([{"id":"zeus"}]));
@@ -362,7 +359,7 @@ mod tests {
 
         let mut claude = json!({"data":[{"id":"argon","display_name":"Gemini 4 Argon (Devin)","type":"model"}]});
         assert!(clean_model_list(&mut claude, &t));
-        assert_eq!(claude["data"][0]["display_name"], "Argon Pool");
+        assert_eq!(claude["data"][0]["display_name"], "argon");
 
         let mut gemini = json!({"models":[{"name":"models/zeus","displayName":"Claude Opus 5.5"}]});
         assert!(clean_model_list(&mut gemini, &t));

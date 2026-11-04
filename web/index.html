@@ -57,6 +57,8 @@ input:focus, select:focus { border-color: var(--accent); }
 .pool.drop { border-color: var(--accent); background: var(--accent-bg); }
 .pool.deleted { opacity: .45; }
 .pool-head { display: flex; align-items: center; gap: 8px; }
+.pool-title { flex: 1; font-family: var(--mono); font-size: 16px; font-weight: 650; padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pool-title.changed { color: var(--warn); }
 .pool-name { flex: 1; font-family: var(--mono); font-size: 16px; font-weight: 650; border: 1px solid transparent; background: transparent;
   border-radius: 6px; padding: 3px 6px; min-width: 0; }
 .pool-name:hover { border-color: var(--border2); }
@@ -131,8 +133,8 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
     <h1>Pools and Aliases</h1>
     <p class="sub">A pool is one model served by several accounts or API keys, for example Claude Opus 5.5 from two
       subscriptions, an API key and Devin. Clients ask for the model and CPA spreads requests across every member; your
-      Routing tiers still decide the order. Give a pool a name like <code>zeus</code> and clients see that name instead
-      of the provider's. Pools are saved as CPA's own model aliases.</p>
+      Routing tiers still decide the order. Clients see the plain model id, never a provider name like “(Devin)”.
+      Pools are saved as CPA's own model aliases.</p>
   </header>
 
   <section id="connect" class="card connect hidden">
@@ -156,7 +158,6 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
   <section id="app" class="hidden">
     <div class="toolbar">
       <select class="pick" id="newModel" style="width:260px"><option value="">Pick a model…</option></select>
-      <input type="text" id="newPool" placeholder="shown as, e.g. zeus" style="width:190px" spellcheck="false">
       <button class="btn primary" id="addPool">+ Create pool</button>
       <span style="flex:1"></span>
       <span class="hint">Clients see</span>
@@ -279,8 +280,9 @@ async function api(method, path, body) {
 
 // ------------------------------------------------------------------ state
 // sources: accounts (OAuth/file credentials) and API keys. Each carries its original alias list.
-// pools:   one model each, registered in plugins.configs.<id>.pools as {name: <model id>, label}.
-//          The pool's CPA name is the model id itself, so clients price and route it as that model.
+// pools:   one model each, registered in plugins.configs.<id>.pools as a list of model ids.
+//          The pool's CPA name is the model id itself, so clients price and route it as that model,
+//          and model lists show that id (the plugin strips provider names such as "(Devin)").
 //          Members are every source serving that model: directly under the same id, or through an
 //          alias (devin/claude-opus-5-5 -> claude-opus-5-5).
 let S = null;
@@ -416,20 +418,16 @@ function optionFor(s, key, exact) {
 
 function readPool(r) {
   const name = r.name;
-  const members = new Map(), labels = new Map();
+  const members = new Map();
   for (const s of S.sources) {
     const e = s.entries.find((x) => isAliasEntry(x) && lc(x.alias) === lc(name));
-    if (!e) continue;
-    members.set(s.id, e.name);
-    labels.set(s.id, typeof e["display-name"] === "string" ? e["display-name"] : "");
+    if (e) members.set(s.id, e.name);
   }
-  const label = r.label || [...labels.values()].find(Boolean) || name;
-  return { id: "p" + (S.nextId++), name, origName: name, label, origLabel: r.label || name,
-    members, origMembers: new Map(members), labels, deleted: false, isNew: false, error: null };
+  return { id: "p" + (S.nextId++), name, origName: name, oldLabel: r.label && r.label !== name ? r.label : "",
+    members, origMembers: new Map(members), deleted: false, isNew: false, error: null };
 }
 
-// Pools from v0.3 and earlier have free names ("zeus"). Rename them to their model id and keep the
-// old name as the label. Pools that mix models or have no members can't be converted automatically.
+// Pools from v0.3 and earlier have free names ("zeus"). Rename them to their model id. Pools that mix models or have no members can't be converted automatically.
 function migrateLegacy() {
   const taken = new Set();
   for (const p of S.pools) if (S.models.has(mkey(p.name)) && [...p.members.values()].every((m) => mkey(m) === mkey(p.name))) taken.add(mkey(p.name));
@@ -441,6 +439,7 @@ function migrateLegacy() {
       if (taken.has(k)) { p.error = `Another pool already serves ${S.models.get(k)?.id || k}. Delete one of them.`; continue; }
       taken.add(k);
       p.legacy = p.name;
+      p.oldLabel = p.oldLabel || p.name;
       p.name = (S.models.get(k) || { id: [...p.members.values()][0].replace(/^.*\//, "") }).id;
     } else if (!keys.size) p.error = "This pool has no models. Pick one with “Switch to…”, or delete it.";
     else p.error = `This pool mixes ${keys.size} different models. A pool holds one model: remove members until one model is left, or delete it.`;
@@ -466,7 +465,14 @@ function isIdentity(e, model) {
 function hasIdentity(entries, model) {
   return (Array.isArray(entries) ? entries : []).some((e) => isIdentity(e, model));
 }
-const poolLabel = (p) => (p.label || "").trim() || p.name;
+// Names written by v0.3/v0.4 ("zeus") as display-name on pool entries; saving removes them.
+function oldNames() {
+  return new Set(S.pools.flatMap((p) => [p.oldLabel, p.legacy]).filter(Boolean).map(lc));
+}
+const stripOldName = (e, old) => {
+  if (e && typeof e["display-name"] === "string" && old.has(lc(e["display-name"]))) { const { ["display-name"]: _, ...rest } = e; return rest; }
+  return e;
+};
 const srcById = (id) => S.sources.find((s) => s.id === id);
 const srcLabel = (s) => `${prov(s.provider).label}${s.kind === "apikey" ? " API key" : ""} · ${s.label}`;
 const poolOf = (key, self) => S.pools.find((p) => p !== self && !p.deleted && !p.error && mkey(p.name) === key);
@@ -478,6 +484,7 @@ function plan() {
   const managed = new Set(S.pools.flatMap((p) => [lc(p.name), lc(p.origName)]).filter(Boolean));
   const touched = new Map();
   const eff = new Map(S.pools.map((p) => [p.id, p.deleted ? new Map() : members(p)]));
+  const old = oldNames();
   for (const s of S.sources) {
     let dirty = false;
     const where = srcLabel(s);
@@ -487,22 +494,24 @@ function plan() {
       const a = eff.get(p.id).get(s.id);
       const renamed = !!p.origName && p.origName !== p.name;
       const needsWrite = a && (!isDirect(p, a) || (s.kind === "apikey" && !hasIdentity(s.entries, a)));
-      const labelChanged = !!a && !!b && !isDirect(p, a) && (p.labels.get(s.id) || "") !== poolLabel(p);
-      if (!b && !needsWrite) continue;
-      if (b && a && b === a && !renamed && !labelChanged) continue;
+      const stale = (s.entries || []).some((e) => (isIdentity(e, p.name) || (isAliasEntry(e) && lc(e.alias) === lc(p.origName || p.name))) &&
+        stripOldName(e, old) !== e);
+      if (!b && !needsWrite && !stale) continue;
+      if (b && a && b === a && !renamed && !stale) continue;
       dirty = true;
       if (b && !a) removedModels.push(b);
-      if (!b) changes.push({ t: "add", text: `+ ${p.name} ← ${a}`, where });
+      if (!b && !needsWrite) changes.push({ t: "mod", text: `~ ${p.name}: drop old name “${[...old].find((n) => (s.entries || []).some((e) => lc(e["display-name"]) === n)) || ""}”`, where });
+      else if (!b) changes.push({ t: "add", text: `+ ${p.name} ← ${a}`, where });
       else if (!a) changes.push({ t: "del", text: `− ${p.origName} ← ${b}`, where });
       else if (b !== a || renamed) changes.push({ t: "mod", text: `~ ${p.origName}${renamed ? " ⇒ " + p.name : ""}: ${b}${b !== a ? " → " + a : ""}${isDirect(p, a) ? "  (direct)" : ""}`, where });
-      else changes.push({ t: "mod", text: `~ ${p.name}: shown to clients as “${poolLabel(p)}”`, where });
+      else changes.push({ t: "mod", text: `~ ${p.name}: drop old name`, where });
     }
     if (!dirty) continue;
     const templates = new Map();
     let entries = (Array.isArray(s.entries) ? s.entries : []).filter((e) => {
-      if (isAliasEntry(e) && managed.has(lc(e.alias))) { templates.set(lc(e.alias), e); return false; }
+      if (isAliasEntry(e) && managed.has(lc(e.alias))) { templates.set(lc(e.alias), stripOldName(e, old)); return false; }
       return true;
-    });
+    }).map((e) => (S.pools.some((p) => isIdentity(e, p.name)) ? stripOldName(e, old) : e));
     for (const p of S.pools) {
       const model = eff.get(p.id).get(s.id);
       if (!model) continue;
@@ -511,12 +520,12 @@ function plan() {
         if (s.kind === "apikey" && !hasIdentity(entries, model)) {
           const tpl = (p.origName && templates.get(lc(p.origName))) || {};
           const { fork, ...rest } = tpl;
-          entries.push({ ...rest, name: model, alias: model, "display-name": poolLabel(p) });
+          entries.push({ ...rest, name: model, alias: model });
         }
         continue;
       }
       const tpl = (p.origName && templates.get(lc(p.origName))) || {};
-      const entry = { ...tpl, name: model, alias: p.name, "display-name": poolLabel(p) };
+      const entry = { ...tpl, name: model, alias: p.name };
       if (s.kind === "auth" && entry.fork === undefined && !tpl.name) entry.fork = true; // keep its own name too
       entries.push(entry);
     }
@@ -531,23 +540,24 @@ function plan() {
     touched.set(s.id, entries);
   }
   const live = S.pools.filter((p) => !p.deleted && !p.error);
-  const names = live.map((p) => ({ name: p.name, label: poolLabel(p) }))
-    .concat(S.pools.filter((p) => !p.deleted && p.error && p.origName).map((p) => ({ name: p.origName, label: p.origLabel })));
-  const registryChanged = JSON.stringify(names) !== JSON.stringify(S.registered.map((r) => ({ name: r.name, label: r.label || r.name })));
+  const names = live.map((p) => p.name)
+    .concat(S.pools.filter((p) => !p.deleted && p.error && p.origName).map((p) => p.origName));
+  const registryChanged = JSON.stringify(names) !== JSON.stringify(S.registered.map((r) => r.name)) ||
+    S.registered.some((r) => r.label && r.label !== r.name);
   for (const p of live) {
-    if (p.isNew) changes.unshift({ t: "add", text: `+ pool ${p.name}, shown as “${poolLabel(p)}”${members(p).size ? "" : " (no members yet)"}`, where: "" });
-    if (!p.isNew && !p.legacy && p.origLabel !== poolLabel(p) && ![...changes].some((c) => c.text.includes(`${p.name}: shown`)))
-      changes.push({ t: "mod", text: `~ ${p.name}: shown to clients as “${poolLabel(p)}”`, where: "" });
+    if (p.isNew) changes.unshift({ t: "add", text: `+ pool ${p.name}${members(p).size ? "" : " (no members yet)"}`, where: "" });
   }
   for (const p of S.pools) if (!p.isNew && p.deleted) {
     if (!changes.some((c) => c.text.startsWith(`− ${p.origName} `))) changes.push({ t: "del", text: `− pool ${p.origName}`, where: "" });
     if (directSources(p).length) notes.push(`Deleting ${p.name} removes its aliases only. ${directSources(p).map((s) => s.label).join(", ")} keep serving ${p.name} directly.`);
   }
-  if (registryChanged && !changes.length) changes.push({ t: "mod", text: "~ pool list", where: "" });
+  if (registryChanged && !changes.length) changes.push({ t: "mod", text: S.registered.some((r) => r.label && r.label !== r.name) ? "~ pool list: drop old names" : "~ pool list", where: "" });
   const legacy = S.pools.filter((p) => p.legacy && !p.deleted);
   if (legacy.length) notes.push("Pools are now named after their model, so clients price and route them as that model: " +
-    legacy.map((p) => `${p.legacy} → ${p.name}`).join(", ") + ". Clients keep seeing the old name as the label. " +
+    legacy.map((p) => `${p.legacy} → ${p.name}`).join(", ") + ". " +
     "Anything that asked for the old name (scripts, saved client settings) must switch to the model id.");
+  if (old.size && !legacy.length) notes.push("Pool names are gone: clients see each pool as its model id. " +
+    "The old names (" + [...old].join(", ") + ") are removed from the pool entries.");
   const seeChanged = S.poolsOnly !== S.origPoolsOnly;
   if (seeChanged) {
     changes.push({ t: "mod", text: `~ clients see: ${S.poolsOnly ? "pools only" : "pools and models"}`, where: "" });
@@ -580,7 +590,7 @@ function renderNewModel() {
   sel.replaceChildren(h("option", { value: "" }, "Pick a model…"));
   for (const e of [...S.models.values()].sort((a, b) => byName(a.id, b.id))) {
     const used = poolOf(e.key);
-    sel.append(h("option", { value: e.key, disabled: !!used }, modelOptionLabel(e) + (used ? `  (pool ${poolLabel(used)})` : "")));
+    sel.append(h("option", { value: e.key, disabled: !!used }, modelOptionLabel(e) + (used ? `  (pool ${used.name})` : "")));
   }
   sel.value = cur && !poolOf(cur) ? cur : "";
 }
@@ -619,10 +629,7 @@ function poolCard(p) {
       try { const d = JSON.parse(e.dataTransfer.getData("text/plain")); addMember(p, d.source, d.model); } catch (_) { /* ignore */ }
     });
   }
-  const labelChanged = !p.isNew && (p.legacy || p.origLabel !== poolLabel(p));
-  const name = h("input", { type: "text", class: "pool-name" + (labelChanged ? " changed" : ""), title: "Name shown to clients",
-    value: poolLabel(p), spellcheck: "false", disabled: p.deleted, placeholder: p.name,
-    onchange: (ev) => { p.label = ev.target.value.trim() || p.name; render(); } });
+  const name = h("div", { class: "pool-title" + (p.origName && p.name !== p.origName ? " changed" : ""), title: p.name }, p.name);
   const del = p.deleted
     ? h("button", { class: "btn ghost", onclick: () => { p.deleted = false; render(); } }, "undo")
     : h("button", { class: "btn ghost danger", title: "Delete this pool (removes only the aliases it created)",
@@ -634,13 +641,12 @@ function poolCard(p) {
   for (const e of [...S.models.values()].sort((a, b) => byName(a.id, b.id))) {
     if (e.key === mkey(p.name) && !p.error) continue;
     const used = poolOf(e.key, p);
-    sw.append(h("option", { value: e.key, disabled: !!used }, modelOptionLabel(e) + (used ? `  (pool ${poolLabel(used)})` : "")));
+    sw.append(h("option", { value: e.key, disabled: !!used }, modelOptionLabel(e) + (used ? `  (pool ${used.name})` : "")));
   }
-  card.append(h("div", { class: "pool-model" }, h("span", {}, "model"),
-    h("code", { class: p.origName && p.name !== p.origName ? "changed" : "" }, p.name),
-    p.legacy ? h("span", { class: "hint" }, `(was ${p.legacy})`) : null, sw));
   if (p.error && !p.deleted) card.append(h("div", { class: "pool-err" }, p.error));
-  card.append(h("div", { class: "pool-meta" }, h("span", {}, `${mem.size} source${mem.size === 1 ? "" : "s"}`)));
+  card.append(h("div", { class: "pool-model" },
+    h("span", {}, `${mem.size} source${mem.size === 1 ? "" : "s"}`),
+    p.legacy ? h("span", { class: "hint" }, `(was ${p.legacy})`) : null, sw));
 
   const list = h("div", { class: "members" });
   if (!mem.size) list.append(h("div", { class: "empty-members" }, "No account or key serves this model yet. Drop one here or add it below."));
@@ -707,7 +713,7 @@ function renderSources() {
         const pool = pooled.get(mkey(o.name));
         const used = pool && members(pool).get(s.id) === o.name;
         const chip = h("span", { class: "chip" + (used ? " used" : ""), draggable: "true",
-          title: used ? `${o.label} · in pool ${poolLabel(pool)}` : o.label }, o.label.split("  ")[0]);
+          title: used ? `${o.label} · in pool ${pool.name}` : o.label }, o.label.split("  ")[0]);
         chip.addEventListener("dragstart", (e) => {
           e.dataTransfer.setData("text/plain", JSON.stringify({ source: s.id, model: o.name }));
           e.dataTransfer.effectAllowed = "copy";
@@ -728,7 +734,7 @@ function addMember(p, sid, model) {
   if (!s || !model || p.deleted) return;
   if (p.error) { toast("Fix this pool first: " + p.error, true); return; }
   if (mkey(model) !== mkey(p.name)) {
-    toast(`${poolLabel(p)} is a ${p.name} pool. ${model} is a different model; a pool holds one model.`, true);
+    toast(`This is the ${p.name} pool. ${model} is a different model; a pool holds one model.`, true);
     return;
   }
   const cur = members(p).get(sid);
@@ -753,8 +759,7 @@ function switchModel(p, key) {
   p.name = e.id;
   p.members = new Map([...next].filter(([, m]) => !isDirect(p, m)));
   p.error = null;
-  if (p.legacy && lc(poolLabel(p)) === lc(oldName)) p.label = p.legacy;
-  const msg = `${poolLabel(p)} now serves ${e.id}.`;
+  const msg = `Pool ${oldName} now serves ${e.id}.`;
   toast(dropped ? `${msg} ${dropped} member${dropped === 1 ? " doesn't" : "s don't"} offer it and left the pool.` : msg);
   render();
 }
@@ -764,15 +769,14 @@ function addPool() {
   const e = S.models.get(key);
   if (!e) { toast("Pick a model first", true); return; }
   if (poolOf(key)) { toast(`${e.id} already has a pool`, true); return; }
-  const label = $("newPool").value.trim() || e.id;
-  const p = { id: "p" + (S.nextId++), name: e.id, origName: null, label, origLabel: label, labels: new Map(),
+  const p = { id: "p" + (S.nextId++), name: e.id, origName: null,
     members: new Map(), origMembers: new Map(), deleted: false, isNew: true, error: null };
   for (const sid of e.sources) {
     const o = optionFor(srcById(sid), key, e.id);
     if (o && !isDirect(p, o.name)) p.members.set(sid, o.name);
   }
   S.pools.push(p);
-  $("newPool").value = ""; $("newModel").value = "";
+  $("newModel").value = "";
   render();
 }
 
@@ -886,7 +890,6 @@ $("connectBtn").onclick = () => connect(false);
 $("key").addEventListener("keydown", (e) => { if (e.key === "Enter") connect(false); });
 $("logout").onclick = () => { localStorage.removeItem(STORE_KEY); sessionStorage.removeItem(STORE_KEY); location.reload(); };
 $("addPool").onclick = addPool;
-$("newPool").addEventListener("keydown", (e) => { if (e.key === "Enter") addPool(); });
 $("search").addEventListener("input", () => renderSources());
 $("reload").onclick = () => load().catch((e) => toast(e.message, true));
 $("seeSeg").onclick = (e) => {
