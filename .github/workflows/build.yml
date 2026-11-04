@@ -67,9 +67,21 @@ jobs:
       - name: Checksums
         run: cd dist && sha256sum *.zip > checksums.txt && cat checksums.txt
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/*.zip
-            dist/checksums.txt
-          generate_release_notes: true
+      # gh instead of a release action: uploads retry (GitHub sometimes answers an asset upload with a 5xx),
+      # and re-running the job on an existing release replaces the assets without touching its notes.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"; repo="$GITHUB_REPOSITORY"
+          gh release view "$tag" -R "$repo" >/dev/null 2>&1 \
+            || gh release create "$tag" -R "$repo" --title "$tag" --generate-notes --verify-tag
+          for f in dist/*.zip dist/checksums.txt; do
+            for i in 1 2 3 4 5; do
+              gh release upload "$tag" "$f" -R "$repo" --clobber && break
+              [ "$i" = 5 ] && exit 1
+              echo "upload of $f failed, retry $i"; sleep $((i * 10))
+            done
+          done
+          gh release edit "$tag" -R "$repo" --draft=false
