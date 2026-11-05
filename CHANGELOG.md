@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 — unreleased
+## 1.1.0 — 2026-11-05
 
 - Cache levels: each pool member shows how long it keeps the prompt cache (Claude logins 1 hour, Claude API keys
   5 minutes; other members are set per pool: no cache, 5 min, 30 min, 1 hour or longer), each pool shows a summary
