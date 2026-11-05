@@ -131,6 +131,7 @@ Codex `gpt-6.1-sol` 272k / 128k, Devin 1M / 64k). `max-context-length` on a key'
 window. OpenAI-compatible members have no catalog entry and show *limits unknown*.
 
 - The pool shows the **smallest** known values: every member can handle a request that fits them.
+- Differences under 10% (1.01M next to 1.05M) aren't flagged.
 - CPA tells clients the limits of **one** member per pool (whichever it registered last), not the smallest. When members
   differ, a long conversation can fail, or a reply end early, when it lands on a member with lower limits. Those
   members are highlighted with *Leave out*; leaving them out makes the pool's limits consistent.
