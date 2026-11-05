@@ -112,7 +112,7 @@ so it gets that member's cache; a conversation that moves to another member star
 - **Claude members are known:** logins get a 1-hour cache from CPA, API keys Anthropic's 5-minute default (1 hour on
   keys with the `claude-code-cli` fingerprint profile).
 - **Every other member** (Devin, Codex, OpenAI-compatible keys, ...) depends on the provider and the model, so you set it
-  per pool member: *no cache*, *5 min*, *1 hour* or *longer*, for example from
+  per pool member: *no cache*, *5 min*, *30 min*, *1 hour* or *longer*, for example from
   [cache-ttl-probe](https://github.com/ngvoicu/cache-ttl-probe) measurements.
 - The pool summary shows the shortest and longest level. Mixed pools work; clients that refresh caches (pi) just have
   to plan for the shortest.

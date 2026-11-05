@@ -3,7 +3,7 @@
 ## 1.1.0 — unreleased
 
 - Cache levels: each pool member shows how long it keeps the prompt cache (Claude logins 1 hour, Claude API keys
-  5 minutes; other members are set per pool: no cache, 5 min, 1 hour or longer), each pool shows a summary
+  5 minutes; other members are set per pool: no cache, 5 min, 30 min, 1 hour or longer), each pool shows a summary
   ("cache: 5 min – 1 hour (mixed)"), and members that don't cache are flagged with a one-click *Leave out*. A member
   marked *no cache* doesn't rejoin automatically. Stored in `plugins.configs.cpa-pools-and-aliases.cache`.
 

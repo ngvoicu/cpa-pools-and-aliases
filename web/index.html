@@ -486,8 +486,8 @@ function autoJoin(p) {
 // its own level; a conversation stays on one member (session affinity) and gets that member's cache.
 // Claude levels are CPA's own fixed behaviour; for every other provider the user sets the level per
 // pool member (plugins.configs.<id>.cache: pool -> source ref -> level).
-const CACHE_LEVELS = [["none", "no cache"], ["5m", "5 min"], ["1h", "1 hour"], ["long", "longer"]];
-const CACHE_RANK = { none: 0, "5m": 1, "1h": 2, long: 3 };
+const CACHE_LEVELS = [["none", "no cache"], ["5m", "5 min"], ["30m", "30 min"], ["1h", "1 hour"], ["long", "longer"]];
+const CACHE_RANK = { none: 0, "5m": 1, "30m": 2, "1h": 3, long: 4 };
 const cacheLabel = (v) => (CACHE_LEVELS.find(([k]) => k === v) || [v, v])[1];
 function knownCache(s) {
   if (!s || s.provider !== "claude") return null;
