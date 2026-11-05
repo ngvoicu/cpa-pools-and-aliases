@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0 — 2026-11-05
+
+- **Extra pools for the same model:** a name turns a new pool into `<name>/<model>` (e.g. `subs/claude-opus-5-5`)
+  with hand-picked members next to the model's main pool. Any account or key can be in several pools; extra pools don't
+  auto-join new sources.
+- **Remove any member, including direct ones:** API keys drop the model from their list; accounts keep it only through
+  extra-pool aliases (`fork: false`) or get it in `excluded_models`. *+ Add* puts them back.
+- **Limits and cache lifetime for clients:** saving stores each pool's smallest context window and output limit, and
+  its cache lifetime when every member caches (`plugins.configs.cpa-pools-and-aliases.limits`). The plugin writes them
+  into pool entries in model lists (`context_window`, `max_context_window`, `max_tokens`, `prompt_cache_ttl_seconds`;
+  Gemini `inputTokenLimit`, `outputTokenLimit`), so they no longer depend on which member CPA registered last.
+
 ## 1.2.1 — 2026-11-05
 
 - Limits: members are flagged only when they are more than 10% below the others (Meta's 1.01M next to Devin's 1.05M
