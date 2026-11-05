@@ -133,9 +133,10 @@ so it gets that member's cache; a conversation that moves to another member star
   OpenAI-compatible OpenRouter entry, which gets no cache markers). The member is highlighted, the review warns about
   it, *Leave out* removes it, and it doesn't rejoin automatically.
 
-Members without a level get a **suggestion** from models.dev with one-click *Use*. CPA's OpenAI-compatible connection
-sends no cache markers, so there models that only cache on request (Claude) are suggested *no cache*, while models that
-cache automatically keep their documented lifetime (GPT-6.1 Sol through OpenRouter: 30 min, which matches measurements).
+Members without a level get a **suggestion** from models.dev with one-click *Use*. On OpenRouter entries CPA marks
+requests for caching (since router-for-me/CLIProxyAPI#7284), so they keep the model's documented lifetime. Other
+OpenAI-compatible entries get no cache markers, so models that only cache on request (Claude) are suggested *no cache*
+there, while models that cache automatically keep their documented lifetime.
 Suggestions count only once you accept them; routes through CPA can differ from the model's provider.
 
 The levels are information for you: the plugin doesn't change any request.

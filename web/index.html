@@ -680,15 +680,16 @@ function publicLimits(s, model) {
   const min = (a, b) => (a && b ? Math.min(a, b) : a || b);
   return { ctx: min(v[0], md && md.ctx), out: min(v[1], md && md.out), src: md ? "OpenRouter + models.dev" : "OpenRouter" };
 }
-// A cache level suggestion for a member whose level isn't set. CPA's OpenAI-compatible connection sends no cache
-// markers, so there models that only cache on request (Claude) get no cache; models that cache automatically keep
-// their documented lifetime. Suggestions count only once accepted.
+// A cache level suggestion for a member whose level isn't set. CPA marks requests for caching on OpenRouter entries
+// (router-for-me/CLIProxyAPI#7284), so those keep the model's documented lifetime. Other OpenAI-compatible entries get
+// no cache markers, so models that only cache on request (Claude) don't cache there; models that cache automatically
+// keep their lifetime. Suggestions count only once accepted.
 function cacheSuggestion(s, model) {
   const e = mdEntry(s, model);
   if (!e) return null;
   const [, , ttl, implicit] = e.v;
-  if (s.provider === "openai-compatibility" && !implicit && ttl) {
-    return { level: "none", why: "This model only caches when the request asks for it, and CPA's OpenAI-compatible connection never does, so it doesn't cache here (measured: Claude through OpenRouter)." };
+  if (s.provider === "openai-compatibility" && !isOpenRouter(s) && !implicit && ttl) {
+    return { level: "none", why: "This model only caches when the request asks for it, and CPA's OpenAI-compatible connection doesn't ask (except for OpenRouter entries), so it doesn't cache here." };
   }
   if (!ttl) return null;
   const level = ttl > 3600 ? "long" : ttl >= 3600 ? "1h" : ttl >= 1800 ? "30m" : "5m";
