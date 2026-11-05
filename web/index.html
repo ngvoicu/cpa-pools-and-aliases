@@ -559,6 +559,9 @@ function cacheSummary(p, mem) {
 // max-context-length on a key's model in the config overrides the window. CPA tells clients one member's
 // limits per pool (whichever it registered last), so when members differ, a long conversation can fail or
 // a reply end early on a member with lower limits. Shown so the user can decide; nothing is changed.
+// Differences under 10% (1.01M vs 1.05M) don't matter in practice and aren't flagged.
+const LIMIT_TOLERANCE = 0.9;
+const isLower = (v, max) => v > 0 && max > 0 && v < max * LIMIT_TOLERANCE;
 const fmtTok = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(2)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 function limitsOf(s, model) {
   if (!s || !model) return null;
@@ -591,7 +594,7 @@ function limitSummary(st, mem) {
   if (!mem.size) return null;
   const parts = [];
   if (st.minCtx || st.minOut) {
-    const mixed = st.minCtx !== st.maxCtx || st.minOut !== st.maxOut;
+    const mixed = isLower(st.minCtx, st.maxCtx) || isLower(st.minOut, st.maxOut);
     const text = `limits: ${st.minCtx ? fmtTok(st.minCtx) : "?"} context · ${st.minOut ? fmtTok(st.minOut) : "?"} output`;
     parts.push(mixed
       ? h("span", { class: "lowl", title: "The smallest limits among members with known values. CPA tells clients the limits of one member only, so a long conversation can fail, or a reply end early, when it lands on a member with lower limits. Leave those out to keep the pool consistent." },
@@ -606,8 +609,8 @@ function limitWarning(st, sid) {
   const l = st && st.per.get(sid);
   if (!l) return null;
   const why = [];
-  if (l.ctx && l.ctx < st.maxCtx) why.push(`context ${fmtTok(l.ctx)}, others up to ${fmtTok(st.maxCtx)}`);
-  if (l.out && l.out < st.maxOut) why.push(`output ${fmtTok(l.out)}, others up to ${fmtTok(st.maxOut)}`);
+  if (isLower(l.ctx, st.maxCtx)) why.push(`context ${fmtTok(l.ctx)}, others up to ${fmtTok(st.maxCtx)}`);
+  if (isLower(l.out, st.maxOut)) why.push(`output ${fmtTok(l.out)}, others up to ${fmtTok(st.maxOut)}`);
   return why.length ? `Lower limits (${why.join("; ")}).` : null;
 }
 function skipMap() {

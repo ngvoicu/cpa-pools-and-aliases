@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1 — 2026-11-05
+
+- Limits: members are flagged only when they are more than 10% below the others (Meta's 1.01M next to Devin's 1.05M
+  is no longer a warning).
+
 ## 1.2.0 — 2026-11-05
 
 - Limits: each pool member shows its context window and output limit (from CPA's model catalog for its provider;
