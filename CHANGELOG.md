@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.2 — 2026-11-06
+
+- Empty page text explains main and extra pools instead of the old free-name example.
+
 ## 1.3.1 — 2026-11-06
 
 - Rename a pool's name prefix any time (field next to the pool title; empty = the model's main pool): main → extra

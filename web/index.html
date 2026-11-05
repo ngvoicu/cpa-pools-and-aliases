@@ -937,8 +937,8 @@ function renderPools() {
   const box = $("pools");
   box.replaceChildren();
   if (!S.pools.length) {
-    box.append(h("div", { class: "empty" }, "No pools yet. Pick a model above, give it a name like ", h("code", {}, "zeus"),
-      " and create it. Every account and key that serves the model joins automatically."));
+    box.append(h("div", { class: "empty" }, "No pools yet. Pick a model above and create its pool: every account and key that serves it joins. ",
+      "Type a name (e.g. ", h("code", {}, "subs"), ") to create an extra pool ", h("code", {}, "subs/<model>"), " with only the members you add."));
     return;
   }
   const grid = h("div", { class: "pools" });
