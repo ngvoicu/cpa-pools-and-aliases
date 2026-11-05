@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.4 — 2026-11-06
+
+- Cache suggestions for OpenRouter entries follow the model's documented lifetime (e.g. Claude 5 min) instead of
+  *no cache*: CPA builds with router-for-me/CLIProxyAPI#7284 mark OpenRouter requests for caching. Other
+  OpenAI-compatible entries keep the *no cache* suggestion for request-only caching models.
+
 ## 1.3.3 — 2026-11-06
 
 - Limits for members CPA has no data for come from OpenRouter's model list (OpenRouter entries) and models.dev v2,
