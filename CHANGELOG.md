@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.3 — 2026-11-06
+
+- Limits for members CPA has no data for come from OpenRouter's model list (OpenRouter entries) and models.dev v2,
+  the smaller value of each when both have one (GPT-6.1 Sol: 922k input). Shown with their source and counted for the
+  pool's limits; *limits unknown* only when neither has the model.
+- Cache level suggestions for members without a level, from models.dev, with one-click *Use*. On OpenAI-compatible
+  entries, models that only cache on request (Claude) are suggested *no cache*, because CPA sends them no cache markers.
+- Both lists are fetched in the background and cached in the browser for a day.
+
 ## 1.3.2 — 2026-11-06
 
 - Empty page text explains main and extra pools instead of the old free-name example.

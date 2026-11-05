@@ -133,13 +133,21 @@ so it gets that member's cache; a conversation that moves to another member star
   OpenAI-compatible OpenRouter entry, which gets no cache markers). The member is highlighted, the review warns about
   it, *Leave out* removes it, and it doesn't rejoin automatically.
 
+Members without a level get a **suggestion** from models.dev with one-click *Use*. CPA's OpenAI-compatible connection
+sends no cache markers, so there models that only cache on request (Claude) are suggested *no cache*, while models that
+cache automatically keep their documented lifetime (GPT-6.1 Sol through OpenRouter: 30 min, which matches measurements).
+Suggestions count only once you accept them; routes through CPA can differ from the model's provider.
+
 The levels are information for you: the plugin doesn't change any request.
 
 ### Limits
 
 Each member shows its **context window / output limit**, from CPA's model catalog for its provider (for example
 Codex `gpt-6.1-sol` 272k / 128k, Devin 1M / 64k). `max-context-length` on a key's model in CPA's config overrides the
-window. OpenAI-compatible members have no catalog entry and show *limits unknown*.
+window. Members CPA has no data for (OpenAI-compatible entries) fall back to **OpenRouter's model list** (for OpenRouter
+entries) and **models.dev** (smaller value of each when both have it, e.g. GPT-6.1 Sol 922k input, not the 1.05M total),
+marked with their source. Only members found nowhere show *limits unknown*. The page fetches both lists in the
+background and keeps a compact extract in the browser for a day.
 
 - The pool shows the **smallest** known values: every member can handle a request that fits them.
 - Differences under 10% (1.01M next to 1.05M) aren't flagged.
