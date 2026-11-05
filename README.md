@@ -53,7 +53,8 @@ The full story, with screenshots: **[Pools for CLIProxyAPI](https://ngvoicu.dev/
   its reasoning levels as that model. Failover moves to another member, never to another model.
 - **Extra pools for the same model.** Give a pool a name and it becomes `<name>/<model>`, e.g. `subs/claude-opus-5-5`
   with only your Claude logins next to the main `claude-opus-5-5`. Clients pick one by name; pi and the page still read
-  it as the model. Any account or key can be in several pools.
+  it as the model. Any account or key can be in several pools The name can be changed later in the field next to the pool title
+  (empty = main pool).
 - **Matching across providers.** The vendor prefix, case and punctuation are ignored: `devin/gpt-6-1-sol` and
   `gpt-6.1-sol` land in the same pool. Dropping a different model on a pool is refused.
 - **New accounts join on their own.** Add an account or key, open the page, and it is already in the pools for its

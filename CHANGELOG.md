@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.1 — 2026-11-06
+
+- Rename a pool's name prefix any time (field next to the pool title; empty = the model's main pool): main → extra
+  keeps members serving the plain id and adds `<name>/` aliases; extra → main drops them, and sources that serve the id
+  directly join, as in every main pool.
+- Red: *limits unknown* and *cache not set* (member and pool summary). Yellow: mixed cache levels, now saying clients
+  plan for the shortest.
+
 ## 1.3.0 — 2026-11-05
 
 - **Extra pools for the same model:** a name turns a new pool into `<name>/<model>` (e.g. `subs/claude-opus-5-5`)

@@ -97,7 +97,14 @@ input:focus, select:focus { border-color: var(--accent); }
 .member .cache-warn { grid-column: 2 / 4; font-size: 12px; color: var(--danger); display: flex; align-items: center; gap: 8px; }
 .pool-cache { margin: 4px 0 0 6px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .pool-cache .bad { color: var(--danger); }
-.pool-cache .unk { color: var(--faint); }
+.pool-cache .unk { color: var(--danger); }
+.pool-cache .mixed { color: var(--warn); }
+.member .lim.unknown { color: var(--danger); }
+.member .cache select.unset { color: var(--danger); border-color: rgba(240,91,91,.6); }
+.member .cache.unset { color: var(--danger); }
+.pool-prefix { font-family: var(--mono); font-size: 12px; width: 92px; padding: 2px 6px; background: transparent; color: var(--muted);
+  border: 1px dashed var(--border2); border-radius: 6px; }
+.pool-prefix.changed { outline: 2px solid var(--warn); outline-offset: -1px; color: inherit; }
 .pool-cache .lowl { color: var(--warn); }
 .member.lowlimit { border-color: rgba(245,165,36,.55); }
 .member .lim { white-space: nowrap; color: var(--muted); font: 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; margin-left: 6px; }
@@ -580,12 +587,12 @@ function cacheSummary(p, mem) {
     const lo = sorted[0], hi = sorted[sorted.length - 1];
     parts.push(lo === hi
       ? h("span", { title: "Every member with a known level keeps the cache this long. With every level set, model lists report it so clients (pi) refresh caches on that schedule." }, `cache: ${cacheLabel(lo)}`)
-      : h("span", { title: `Each conversation stays on one member and gets that member's cache. Clients that refresh caches have to plan for the shortest (${cacheLabel(lo)}).` },
-          `cache: ${cacheLabel(lo)} – ${cacheLabel(hi)} (mixed)`));
+      : h("span", { class: "mixed", title: `Each conversation stays on one member and gets that member's cache. Clients that refresh caches can't tell which member serves them, so they plan for the shortest (${cacheLabel(lo)}): members with longer caches get refreshed more often than needed. Split them into an extra pool to give each its own lifetime.` },
+          `cache: ${cacheLabel(lo)} – ${cacheLabel(hi)} (mixed) · clients plan for ${cacheLabel(lo)}`));
   }
   if (none.length) parts.push(h("span", { class: "bad", title: "Conversations served by these members pay the full price on every message." },
     `⚠ ${none.length} member${none.length === 1 ? " doesn't" : "s don't"} cache`));
-  if (unknown.length) parts.push(h("span", { class: "unk", title: "Set the cache level on each member below." },
+  if (unknown.length) parts.push(h("span", { class: "unk", title: "Set the cache level on each member below. Until every member has one, the pool reports no cache lifetime to clients." },
     `${unknown.length} cache level${unknown.length === 1 ? "" : "s"} not set`));
   return h("div", { class: "pool-cache" }, ...parts);
 }
@@ -951,11 +958,20 @@ function poolCard(p) {
     });
   }
   const name = h("div", { class: "pool-title" + (p.origName && p.name !== p.origName ? " changed" : ""), title: p.name }, p.name);
+  const origPrefix = p.origName ? prefixOf(p.origName) : null;
+  const prefixInput = p.deleted || p.error ? null : h("input", {
+    class: "pool-prefix" + (origPrefix !== null && prefixOf(p.name) !== origPrefix ? " changed" : ""),
+    value: prefixOf(p.name), placeholder: "main", spellcheck: "false",
+    title: "Pool name. Empty: the model's main pool (its plain id). A name such as subs makes it an extra pool subs/<model>. Press Enter to apply.",
+    onkeydown: (ev) => { if (ev.key === "Enter") ev.target.blur(); },
+    onchange: (ev) => renamePool(p, ev.target.value.trim()),
+  });
+  if (prefixInput) prefixInput.value = prefixOf(p.name);
   const del = p.deleted
     ? h("button", { class: "btn ghost", onclick: () => { p.deleted = false; render(); } }, "undo")
     : h("button", { class: "btn ghost danger", title: "Delete this pool (removes only the aliases it created)",
         onclick: () => { if (p.isNew) S.pools.splice(S.pools.indexOf(p), 1); else p.deleted = true; render(); } }, "✕");
-  card.append(h("div", { class: "pool-head" }, name, del));
+  card.append(h("div", { class: "pool-head" }, name, prefixInput, del));
 
   const sw = h("select", { class: "pick", disabled: p.deleted, title: "Move every member to another model, e.g. when a new version ships",
     onchange: (ev) => { if (ev.target.value) switchModel(p, ev.target.value); } }, h("option", { value: "" }, "Switch to…"));
@@ -985,9 +1001,9 @@ function poolCard(p) {
     const leaveOut = () => { p.members.delete(sid); p.auto.delete(sid); p.skip.add(s.ref); render(); };
     const cacheEl = c && c.known
       ? h("span", { class: "cache", title: c.why }, ` · cache ${cacheLabel(c.level)}`)
-      : h("span", { class: "cache", title: "How long this member keeps the prompt cache for this model (from your measurements). Used for the pool summary and warnings." },
+      : h("span", { class: "cache" + (c ? "" : " unset"), title: c ? "How long this member keeps the prompt cache for this model (from your measurements). Used for the pool summary, warnings and the lifetime reported to clients." : "Cache level not set: the pool reports no cache lifetime to clients until every member has one. Set it from your measurements, or no cache." },
           " · cache",
-          h("select", { disabled: p.deleted, onclick: (ev) => ev.stopPropagation(), onchange: (ev) => {
+          h("select", { class: c ? "" : "unset", disabled: p.deleted, onclick: (ev) => ev.stopPropagation(), onchange: (ev) => {
             if (ev.target.value) p.cache.set(s.ref, ev.target.value); else p.cache.delete(s.ref);
             render();
           } }, h("option", { value: "" }, "not set"), ...CACHE_LEVELS.map(([v, label]) => {
@@ -998,7 +1014,7 @@ function poolCard(p) {
     const limEl = !st ? null : lim
       ? h("span", { class: "lim", title: `Context window / output limit${lim.cfg ? " (window from max-context-length in CPA's config)" : ""}, from CPA's model catalog.` },
           `${lim.ctx ? fmtTok(lim.ctx) : "?"} / ${lim.out ? fmtTok(lim.out) : "?"}`)
-      : h("span", { class: "lim", title: "CPA has no catalog entry for this model on this provider." }, "limits unknown");
+      : h("span", { class: "lim unknown", title: "CPA has no catalog entry for this model on this provider, so the pool's limits ignore it and requests here may hit a smaller window. max-context-length on the model in CPA's config sets its window." }, "limits unknown");
     const lowWhy = limitWarning(st, sid);
     list.append(h("div", { class: "member" + (isNew ? " new" : "") + (nocache ? " nocache" : lowWhy ? " lowlimit" : ""), title: srcLabel(s) },
       h("i", { class: "dot", style: `background:${prov(s.provider).color}` }),
@@ -1119,6 +1135,33 @@ function switchModel(p, key) {
   p.error = null;
   const msg = `Pool ${oldName} is now ${nextName}.`;
   toast(dropped ? `${msg} ${dropped} member${dropped === 1 ? " doesn't" : "s don't"} offer it and left the pool.` : msg);
+  render();
+}
+
+// Change a pool's name prefix: "" makes it the model's main pool, "subs" makes it subs/<model>.
+function renamePool(p, prefix) {
+  if (p.deleted || p.error) return;
+  const model = p.name.replace(/^.*\//, "");
+  if (prefix && !PREFIX_RE.test(prefix)) { toast("Use letters, digits, - or _ for the name (e.g. subs).", true); render(); return; }
+  if (prefix && S.sources.some((s) => s.options.some((o) => lc(o.name).startsWith(lc(prefix) + "/")))) {
+    toast(`${prefix}/ is already used by model names in CPA. Pick another name.`, true); render(); return;
+  }
+  const next = prefix ? `${prefix}/${model}` : model;
+  if (lc(next) === lc(p.name)) return;
+  if (poolByName(next, p)) {
+    toast(prefix ? `There is already a pool called ${next}.` : `${model} already has its main pool. Rename that one first.`, true);
+    render(); return;
+  }
+  const old = p.name;
+  if (S.skip[old]) { S.skip = { ...S.skip }; S.skip[next] = S.skip[old]; delete S.skip[old]; }
+  p.name = next;
+  // a main pool's direct members reach an extra pool through aliases (keeping their own name); an extra pool that
+  // becomes the main pool serves the plain id, so members whose model is that id become direct again
+  let joined = 0;
+  if (!prefix) for (const src of S.sources) {
+    if (!p.members.has(src.id) && servesDirect(src, model)) { p.members.set(src.id, model); p.auto.add(src.id); joined++; }
+  }
+  toast(`${old} will be saved as ${next}.` + (joined ? ` ${joined} source${joined === 1 ? " that serves" : "s that serve"} ${model} directly joined, as in every main pool; remove any you don't want.` : ""));
   render();
 }
 
