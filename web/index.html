@@ -91,6 +91,13 @@ input:focus, select:focus { border-color: var(--accent); }
 .pool-model select { margin-left: auto; max-width: 52%; font-size: 12px; padding: 3px 6px; }
 .pool-err { border: 1px solid rgba(239,68,68,.5); background: rgba(239,68,68,.08); color: var(--text); border-radius: 8px; padding: 8px 10px; font-size: 12px; margin: 8px 0 0; }
 .member .lock { color: var(--faint); font-size: 11px; padding: 0 6px; }
+.member.nocache { border-color: rgba(240,91,91,.55); }
+.member .cache { white-space: nowrap; }
+.member .cache select { font-size: 11px; padding: 0 4px; margin-left: 2px; background: transparent; color: inherit; border: 1px solid var(--border2); border-radius: 4px; }
+.member .cache-warn { grid-column: 2 / 4; font-size: 12px; color: var(--danger); display: flex; align-items: center; gap: 8px; }
+.pool-cache { margin: 4px 0 0 6px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.pool-cache .bad { color: var(--danger); }
+.pool-cache .unk { color: var(--faint); }
 
 .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); display: flex; flex-direction: column; overflow: hidden; }
 .side-head { padding: 12px 12px 8px; border-bottom: 1px solid var(--border); }
@@ -356,11 +363,13 @@ async function load() {
       const keyLevel = keys.map((k, ki) => ({ k, ki })).filter(({ k }) => hasKey(k) && Array.isArray(k.models));
       if (Array.isArray(g.models) || keyLevel.length === 0) {
         sources.push({ id: `apikey:${p0}:${gi}`, ref: `key:${p0}/${name}`, kind: "apikey", provider: p, providerKey: p0, gi, ki: null,
-          label: name, entries: clone(g.models || []), hadList: Array.isArray(g.models) && g.models.length > 0 });
+          label: name, entries: clone(g.models || []), hadList: Array.isArray(g.models) && g.models.length > 0,
+          profile: g["fingerprint-profile"] || (keys.find(hasKey) || {})["fingerprint-profile"] || "" });
       }
       for (const { k, ki } of keyLevel) {
         sources.push({ id: `apikey:${p0}:${gi}:${ki}`, ref: `key:${p0}/${name}#${ki + 1}`, kind: "apikey", provider: p, providerKey: p0, gi, ki,
-          label: name + (keys.length > 1 ? ` · key ${ki + 1}` : ""), entries: clone(k.models || []), hadList: k.models.length > 0 });
+          label: name + (keys.length > 1 ? ` · key ${ki + 1}` : ""), entries: clone(k.models || []), hadList: k.models.length > 0,
+          profile: k["fingerprint-profile"] || g["fingerprint-profile"] || "" });
       }
     });
   }
@@ -370,8 +379,9 @@ async function load() {
 
   const poolsOnly = !!(pluginCfg && pluginCfg["pools-only"] === true);
   const skip = (pluginCfg && pluginCfg.skip && typeof pluginCfg.skip === "object") ? pluginCfg.skip : {};
+  const cache = (pluginCfg && pluginCfg.cache && typeof pluginCfg.cache === "object" && !Array.isArray(pluginCfg.cache)) ? pluginCfg.cache : {};
   S = { config, pluginCfg: pluginCfg || {}, sources, pools: [], nextId: 0, catalogs, registered,
-    poolsOnly, origPoolsOnly: poolsOnly, skip, keyless };
+    poolsOnly, origPoolsOnly: poolsOnly, skip, cache, keyless };
   S.models = modelCatalog();
   S.pools = registered.map((r) => readPool(r));
   migrateLegacy();
@@ -432,9 +442,11 @@ function readPool(r) {
     if (e) members.set(s.id, e.name);
   }
   const sk = Array.isArray(S.skip[name]) ? S.skip[name].filter((x) => typeof x === "string") : [];
+  const raw = S.cache[name] && typeof S.cache[name] === "object" ? S.cache[name] : {};
+  const cache = new Map(Object.entries(raw).filter(([, v]) => CACHE_RANK[v] !== undefined));
   return { id: "p" + (S.nextId++), name, origName: name, oldLabel: r.label && r.label !== name ? r.label : "",
     members, origMembers: new Map(members), deleted: false, isNew: false, error: null,
-    skip: new Set(sk), origSkip: new Set(sk), auto: new Set() };
+    skip: new Set(sk), origSkip: new Set(sk), auto: new Set(), cache, origCache: new Map(cache) };
 }
 
 // Pools from v0.3 and earlier have free names ("zeus"). Rename them to their model id. Pools that mix models or have no members can't be converted automatically.
@@ -463,12 +475,71 @@ function autoJoin(p) {
   const key = mkey(p.name), cur = members(p);
   let n = 0;
   for (const s of S.sources) {
-    if (cur.has(s.id) || p.skip.has(s.ref)) continue;
+    if (cur.has(s.id) || p.skip.has(s.ref) || p.cache.get(s.ref) === "none") continue;
     const o = optionFor(s, key, p.name);
     if (!o || isDirect(p, o.name)) continue;
     p.members.set(s.id, o.name); p.auto.add(s.id); n++;
   }
   return n;
+}
+// Cache levels. A prompt cache belongs to the account that served the request, so each member keeps
+// its own level; a conversation stays on one member (session affinity) and gets that member's cache.
+// Claude levels are CPA's own fixed behaviour; for every other provider the user sets the level per
+// pool member (plugins.configs.<id>.cache: pool -> source ref -> level).
+const CACHE_LEVELS = [["none", "no cache"], ["5m", "5 min"], ["1h", "1 hour"], ["long", "longer"]];
+const CACHE_RANK = { none: 0, "5m": 1, "1h": 2, long: 3 };
+const cacheLabel = (v) => (CACHE_LEVELS.find(([k]) => k === v) || [v, v])[1];
+function knownCache(s) {
+  if (!s || s.provider !== "claude") return null;
+  if (s.kind === "auth") return { level: "1h", why: "CPA gives Claude logins Anthropic's 1-hour cache." };
+  if (lc(s.profile) === "claude-code-cli") return { level: "1h", why: "This key uses the claude-code-cli profile, so CPA gives it the 1-hour cache." };
+  return { level: "5m", why: "Claude API keys get Anthropic's 5-minute cache (1 hour only when the client asks for it)." };
+}
+function cacheOf(p, s) {
+  const k = knownCache(s);
+  if (k) return { level: k.level, known: true, why: k.why };
+  const v = p.cache.get(s.ref);
+  return v ? { level: v, known: false } : null;
+}
+function cacheMap() {
+  const out = {};
+  for (const p of S.pools) {
+    if (p.deleted) continue;
+    const mem = members(p);
+    const refs = {};
+    for (const [ref, v] of [...p.cache].sort((a, b) => byName(a[0], b[0]))) {
+      const s = S.sources.find((x) => x.ref === ref);
+      if (!s || knownCache(s)) continue;
+      if (mem.has(s.id) || p.skip.has(ref)) refs[ref] = v; // keep marks for members and left-out sources only
+    }
+    if (Object.keys(refs).length) out[p.name] = refs;
+  }
+  return out;
+}
+function cacheSummary(p, mem) {
+  const levels = [], unknown = [], none = [];
+  for (const sid of mem.keys()) {
+    const s = srcById(sid);
+    const c = cacheOf(p, s);
+    if (!c) unknown.push(s);
+    else if (c.level === "none") none.push(s);
+    else levels.push(c.level);
+  }
+  if (!mem.size) return null;
+  const parts = [];
+  if (levels.length) {
+    const sorted = [...new Set(levels)].sort((a, b) => CACHE_RANK[a] - CACHE_RANK[b]);
+    const lo = sorted[0], hi = sorted[sorted.length - 1];
+    parts.push(lo === hi
+      ? h("span", { title: "Every member with a known level keeps the cache this long." }, `cache: ${cacheLabel(lo)}`)
+      : h("span", { title: `Each conversation stays on one member and gets that member's cache. Clients that refresh caches have to plan for the shortest (${cacheLabel(lo)}).` },
+          `cache: ${cacheLabel(lo)} – ${cacheLabel(hi)} (mixed)`));
+  }
+  if (none.length) parts.push(h("span", { class: "bad", title: "Conversations served by these members pay the full price on every message." },
+    `⚠ ${none.length} member${none.length === 1 ? " doesn't" : "s don't"} cache`));
+  if (unknown.length) parts.push(h("span", { class: "unk", title: "Set the cache level on each member below." },
+    `${unknown.length} cache level${unknown.length === 1 ? "" : "s"} not set`));
+  return h("div", { class: "pool-cache" }, ...parts);
 }
 function skipMap() {
   const out = {};
@@ -599,13 +670,32 @@ function plan() {
     }
   }
   if (skipChanged && !changes.length) changes.push({ t: "mod", text: "~ left-out sources", where: "" });
+  const cacheNow = cacheMap();
+  const cacheBefore = JSON.stringify(Object.fromEntries(Object.entries(S.cache).filter(([, v]) => v && typeof v === "object" && Object.keys(v).length)
+    .map(([k, v]) => [k, Object.fromEntries(Object.entries(v).sort((a, b) => byName(a[0], b[0])))])));
+  const cacheChanged = JSON.stringify(cacheNow) !== cacheBefore;
+  for (const p of S.pools) {
+    if (p.deleted) continue;
+    for (const [ref, v] of p.cache) if (p.origCache.get(ref) !== v) {
+      const src = S.sources.find((x) => x.ref === ref);
+      if (src) changes.push({ t: "mod", text: `~ ${p.name}: cache ${cacheLabel(v)}`, where: srcLabel(src) });
+    }
+    for (const [ref] of p.origCache) if (!p.cache.has(ref)) {
+      const src = S.sources.find((x) => x.ref === ref);
+      if (src) changes.push({ t: "mod", text: `~ ${p.name}: cache not set`, where: srcLabel(src) });
+    }
+    const nocache = [...members(p).keys()].map(srcById).filter((s) => s && cacheOf(p, s)?.level === "none");
+    if (nocache.length) notes.push(`${p.name}: ${nocache.map((s) => s.label).join(", ")} ${nocache.length === 1 ? "doesn't" : "don't"} cache. ` +
+      "Conversations served there pay the full price on every message; consider leaving them out.");
+  }
+  if (cacheChanged && !changes.some((c) => c.text.includes(": cache "))) changes.push({ t: "mod", text: "~ cache levels", where: "" });
   const seeChanged = S.poolsOnly !== S.origPoolsOnly;
   if (seeChanged) {
     changes.push({ t: "mod", text: `~ clients see: ${S.poolsOnly ? "pools only" : "pools and models"}`, where: "" });
     if (S.poolsOnly) notes.push("Pools only hides every other model from model lists. Clients that already know a model's " +
       "name can still use it; to retire a model completely, remove or exclude it in CPA.");
   }
-  return { changes, notes, touched, names, registryChanged, seeChanged, errors, skipNow, skipChanged };
+  return { changes, notes, touched, names, registryChanged, seeChanged, errors, skipNow, skipChanged, cacheNow, cacheChanged };
 }
 
 // ------------------------------------------------------------------ render
@@ -696,6 +786,7 @@ function poolCard(p) {
   card.append(h("div", { class: "pool-model" },
     h("span", {}, `${mem.size} source${mem.size === 1 ? "" : "s"}`),
     p.legacy ? h("span", { class: "hint" }, `(was ${p.legacy})`) : null, sw));
+  if (!p.deleted && !p.error) { const cs = cacheSummary(p, mem); if (cs) card.append(cs); }
 
   const list = h("div", { class: "members" });
   if (!mem.size) list.append(h("div", { class: "empty-members" }, "No account or key serves this model yet. Drop one here or add it below."));
@@ -704,15 +795,29 @@ function poolCard(p) {
     if (!s) continue;
     const direct = !p.error && isDirect(p, model);
     const isNew = !direct && (p.origMembers.get(sid) !== model || (p.origName && p.name !== p.origName));
-    list.append(h("div", { class: "member" + (isNew ? " new" : ""), title: srcLabel(s) },
+    const c = cacheOf(p, s);
+    const leaveOut = () => { p.members.delete(sid); p.auto.delete(sid); p.skip.add(s.ref); render(); };
+    const cacheEl = c && c.known
+      ? h("span", { class: "cache", title: c.why }, ` · cache ${cacheLabel(c.level)}`)
+      : h("span", { class: "cache", title: "How long this member keeps the prompt cache for this model (from your measurements). Used for the pool summary and warnings." },
+          " · cache",
+          h("select", { disabled: p.deleted, onclick: (ev) => ev.stopPropagation(), onchange: (ev) => {
+            if (ev.target.value) p.cache.set(s.ref, ev.target.value); else p.cache.delete(s.ref);
+            render();
+          } }, h("option", { value: "" }, "not set"), ...CACHE_LEVELS.map(([v, label]) => {
+            const o = h("option", { value: v }, label); if (c && c.level === v) o.selected = true; return o;
+          })));
+    const nocache = c && c.level === "none";
+    list.append(h("div", { class: "member" + (isNew ? " new" : "") + (nocache ? " nocache" : ""), title: srcLabel(s) },
       h("i", { class: "dot", style: `background:${prov(s.provider).color}` }),
       h("div", { style: "min-width:0" },
         h("div", { class: "model" }, model, " ", direct ? h("span", { class: "badge direct" }, "direct") : null),
-        h("div", { class: "src" }, srcLabel(s), s.disabled ? " (disabled)" : "")),
+        h("div", { class: "src" }, srcLabel(s), s.disabled ? " (disabled)" : "", cacheEl)),
       direct
         ? h("span", { class: "lock", title: `${s.label} serves ${p.name} under that exact name, so CPA always includes it. Exclude the model on that account to leave it out.` }, "always in")
-        : h("button", { class: "btn ghost danger", title: "Remove from pool", disabled: p.deleted,
-            onclick: () => { p.members.delete(sid); p.auto.delete(sid); p.skip.add(s.ref); render(); } }, "✕")));
+        : h("button", { class: "btn ghost danger", title: "Remove from pool", disabled: p.deleted, onclick: leaveOut }, "✕"),
+      nocache ? h("div", { class: "cache-warn" }, "Doesn't cache: every message served here pays the full price.",
+        direct ? null : h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut }, "Leave out")) : null));
   }
   card.append(list);
   const removed = [...p.origMembers.keys()].filter((sid) => !mem.has(sid)).map(srcById).filter(Boolean);
@@ -825,7 +930,7 @@ function addPool() {
   if (!e) { toast("Pick a model first", true); return; }
   if (poolOf(key)) { toast(`${e.id} already has a pool`, true); return; }
   const p = { id: "p" + (S.nextId++), name: e.id, origName: null, skip: new Set(), origSkip: new Set(), auto: new Set(),
-    members: new Map(), origMembers: new Map(), deleted: false, isNew: true, error: null };
+    cache: new Map(), origCache: new Map(), members: new Map(), origMembers: new Map(), deleted: false, isNew: true, error: null };
   for (const sid of e.sources) {
     const o = optionFor(srcById(sid), key, e.id);
     if (o && !isDirect(p, o.name)) p.members.set(sid, o.name);
@@ -845,7 +950,7 @@ function openReview() {
 }
 
 async function save() {
-  const { touched, names, registryChanged, seeChanged, skipNow, skipChanged } = plan();
+  const { touched, names, registryChanged, seeChanged, skipNow, skipChanged, cacheNow, cacheChanged } = plan();
   const btn = $("confirmSave");
   btn.disabled = true; btn.replaceChildren(h("span", { class: "spin" }), " Saving…");
   const errors = [];
@@ -873,6 +978,9 @@ async function save() {
     }
     if (skipChanged && errors.length === 0) {
       try { await api("PUT", `/config/plugins/configs/${PLUGIN_ID}/skip`, skipNow); } catch (e) { errors.push(e.message); }
+    }
+    if (cacheChanged && errors.length === 0) {
+      try { await api("PUT", `/config/plugins/configs/${PLUGIN_ID}/cache`, cacheNow); } catch (e) { errors.push(e.message); }
     }
     if (seeChanged && errors.length === 0) {
       try { await api("PUT", `/config/plugins/configs/${PLUGIN_ID}/pools-only`, S.poolsOnly); } catch (e) { errors.push(e.message); }

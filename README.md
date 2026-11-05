@@ -59,6 +59,8 @@ The full story, with screenshots: **[Pools for CLIProxyAPI](https://ngvoicu.dev/
   shows as its plain id, never as `Claude Opus 5.5 (Devin)`.
 - **Pools only.** One switch hides every model that isn't in a pool from model lists. Requests by name still work.
 - **Switch to…** moves a whole pool to a new model version in one save.
+- **Cache levels.** Each member shows how long it keeps the prompt cache, and each pool shows a summary such as
+  "cache: 5 min – 1 hour (mixed)". Members that don't cache are flagged and can be left out with one click.
 - **Review before save.** Every save lists the exact changes, account by account.
 - **Nothing in the request path.** Pools are saved as CPA's own aliases. Remove the plugin and your pools keep working.
 
@@ -96,10 +98,29 @@ alias `<their model> → <pool id>`. The plugin itself only renders the page and
 | API-key member | `api-keys.<provider>[group](.keys[i]).models[]` | `PUT /v8/management/config/api-keys/<provider>` |
 | Pool list | `plugins.configs.cpa-pools-and-aliases.pools` (model ids) | `PUT /v8/management/config/plugins/configs/cpa-pools-and-aliases/pools` |
 | Removed members | `plugins.configs.cpa-pools-and-aliases.skip` | same, `/skip` |
+| Cache levels you set | `plugins.configs.cpa-pools-and-aliases.cache` (pool → member → level) | same, `/cache` |
 | *Pools only* | `plugins.configs.cpa-pools-and-aliases.pools-only` | same, `/pools-only` |
 
 Aliases for names that aren't pools are never shown or changed. Deleting a pool removes only the aliases it
 created; accounts that serve the model directly keep serving it.
+
+### Cache levels
+
+A prompt cache belongs to the account that served the request. Session affinity keeps a conversation on one member,
+so it gets that member's cache; a conversation that moves to another member starts cold.
+
+- **Claude members are known:** logins get a 1-hour cache from CPA, API keys Anthropic's 5-minute default (1 hour on
+  keys with the `claude-code-cli` fingerprint profile).
+- **Every other member** (Devin, Codex, OpenAI-compatible keys, ...) depends on the provider and the model, so you set it
+  per pool member: *no cache*, *5 min*, *1 hour* or *longer*, for example from
+  [cache-ttl-probe](https://github.com/ngvoicu/cache-ttl-probe) measurements.
+- The pool summary shows the shortest and longest level. Mixed pools work; clients that refresh caches (pi) just have
+  to plan for the shortest.
+- **No cache** marks a member whose conversations pay the full price on every message (for example Claude through an
+  OpenAI-compatible OpenRouter entry, which gets no cache markers). The member is highlighted, the review warns about
+  it, *Leave out* removes it, and it doesn't rejoin automatically.
+
+The levels are information for you: the plugin doesn't change any request.
 
 ### Good to know
 
