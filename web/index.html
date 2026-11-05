@@ -98,6 +98,10 @@ input:focus, select:focus { border-color: var(--accent); }
 .pool-cache { margin: 4px 0 0 6px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .pool-cache .bad { color: var(--danger); }
 .pool-cache .unk { color: var(--faint); }
+.pool-cache .lowl { color: var(--warn); }
+.member.lowlimit { border-color: rgba(245,165,36,.55); }
+.member .lim { white-space: nowrap; color: var(--muted); font: 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; margin-left: 6px; }
+.member .limit-warn { grid-column: 2 / 4; font-size: 12px; color: var(--warn); display: flex; align-items: center; gap: 8px; }
 
 .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); display: flex; flex-direction: column; overflow: hidden; }
 .side-head { padding: 12px 12px 8px; border-bottom: 1px solid var(--border); }
@@ -324,11 +328,21 @@ async function load() {
       if (!(Array.isArray(g.models) && g.models.length) && !keyLists.length) needCatalog.add(lc(p));
     });
   }
-  await Promise.all([...needCatalog].map(async (p) => {
+  // Every provider's catalog: model ids for keys without a model list, and context/output limits for
+  // every member. OpenAI-compatible providers have no CPA catalog; others without one fail quietly.
+  const providers = new Set([...Object.keys(apiKeys).map(lc), ...authFiles.map((f) => lc(f.provider || f.type)).filter(Boolean)]);
+  providers.delete("openai-compatibility");
+  const limitCat = {};
+  await Promise.all([...providers].map(async (p) => {
     try {
       const r = await api("GET", "/routing/model-definitions/" + encodeURIComponent(p));
-      catalogs[p] = ((r && r.models) || []).map((m) => m.id || m.name).filter(Boolean);
-    } catch (_) { catalogs[p] = []; }
+      limitCat[p] = ((r && r.models) || []).map((m) => ({
+        id: m.id || m.name,
+        ctx: Number(m.context_length) || Number(m.inputTokenLimit) || 0,
+        out: Number(m.max_completion_tokens) || Number(m.outputTokenLimit) || 0,
+      })).filter((m) => m.id);
+    } catch (_) { limitCat[p] = []; }
+    if (needCatalog.has(p)) catalogs[p] = limitCat[p].map((m) => m.id);
   }));
 
   const sources = [];
@@ -380,7 +394,7 @@ async function load() {
   const poolsOnly = !!(pluginCfg && pluginCfg["pools-only"] === true);
   const skip = (pluginCfg && pluginCfg.skip && typeof pluginCfg.skip === "object") ? pluginCfg.skip : {};
   const cache = (pluginCfg && pluginCfg.cache && typeof pluginCfg.cache === "object" && !Array.isArray(pluginCfg.cache)) ? pluginCfg.cache : {};
-  S = { config, pluginCfg: pluginCfg || {}, sources, pools: [], nextId: 0, catalogs, registered,
+  S = { config, pluginCfg: pluginCfg || {}, sources, pools: [], nextId: 0, catalogs, limitCat, registered,
     poolsOnly, origPoolsOnly: poolsOnly, skip, cache, keyless };
   S.models = modelCatalog();
   S.pools = registered.map((r) => readPool(r));
@@ -540,6 +554,61 @@ function cacheSummary(p, mem) {
   if (unknown.length) parts.push(h("span", { class: "unk", title: "Set the cache level on each member below." },
     `${unknown.length} cache level${unknown.length === 1 ? "" : "s"} not set`));
   return h("div", { class: "pool-cache" }, ...parts);
+}
+// Limits. A member's context window and output limit come from CPA's model catalog for its provider;
+// max-context-length on a key's model in the config overrides the window. CPA tells clients one member's
+// limits per pool (whichever it registered last), so when members differ, a long conversation can fail or
+// a reply end early on a member with lower limits. Shown so the user can decide; nothing is changed.
+const fmtTok = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(2)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+function limitsOf(s, model) {
+  if (!s || !model) return null;
+  const list = (S.limitCat && S.limitCat[s.provider]) || [];
+  const bare = lc(model).replace(/^.*\//, "");
+  const m = list.find((x) => lc(x.id) === lc(model)) || list.find((x) => lc(x.id) === bare) || list.find((x) => mkey(x.id) === mkey(model));
+  let ctx = m ? m.ctx : 0;
+  const out = m ? m.out : 0;
+  const e = s.kind === "apikey" ? s.entries.find((x) => x && x.name && lc(x.name) === lc(model)) : null;
+  const cfg = e ? Number(e["max-context-length"]) || 0 : 0;
+  if (cfg > 0) ctx = cfg;
+  if (!ctx && !out) return null;
+  return { ctx, out, cfg: cfg > 0 };
+}
+function limitStats(mem) {
+  const per = new Map(), unknown = [];
+  for (const [sid, model] of mem) {
+    const s = srcById(sid);
+    if (!s) continue;
+    const l = limitsOf(s, model);
+    if (l) per.set(sid, l); else unknown.push(s);
+  }
+  const vals = (k) => [...per.values()].map((l) => l[k]).filter((n) => n > 0);
+  const ctx = vals("ctx"), out = vals("out");
+  return { per, unknown,
+    minCtx: ctx.length ? Math.min(...ctx) : 0, maxCtx: ctx.length ? Math.max(...ctx) : 0,
+    minOut: out.length ? Math.min(...out) : 0, maxOut: out.length ? Math.max(...out) : 0 };
+}
+function limitSummary(st, mem) {
+  if (!mem.size) return null;
+  const parts = [];
+  if (st.minCtx || st.minOut) {
+    const mixed = st.minCtx !== st.maxCtx || st.minOut !== st.maxOut;
+    const text = `limits: ${st.minCtx ? fmtTok(st.minCtx) : "?"} context · ${st.minOut ? fmtTok(st.minOut) : "?"} output`;
+    parts.push(mixed
+      ? h("span", { class: "lowl", title: "The smallest limits among members with known values. CPA tells clients the limits of one member only, so a long conversation can fail, or a reply end early, when it lands on a member with lower limits. Leave those out to keep the pool consistent." },
+          `${text} (smallest; members differ)`)
+      : h("span", { title: "Every member with known limits allows this much." }, text));
+  }
+  if (st.unknown.length) parts.push(h("span", { class: "unk", title: "CPA has no catalog entry for this model on these members (e.g. OpenAI-compatible providers). max-context-length on the model in CPA's config sets its window." },
+    `${st.unknown.length} limit${st.unknown.length === 1 ? "" : "s"} unknown`));
+  return parts.length ? h("div", { class: "pool-cache" }, ...parts) : null;
+}
+function limitWarning(st, sid) {
+  const l = st && st.per.get(sid);
+  if (!l) return null;
+  const why = [];
+  if (l.ctx && l.ctx < st.maxCtx) why.push(`context ${fmtTok(l.ctx)}, others up to ${fmtTok(st.maxCtx)}`);
+  if (l.out && l.out < st.maxOut) why.push(`output ${fmtTok(l.out)}, others up to ${fmtTok(st.maxOut)}`);
+  return why.length ? `Lower limits (${why.join("; ")}).` : null;
 }
 function skipMap() {
   const out = {};
@@ -786,7 +855,11 @@ function poolCard(p) {
   card.append(h("div", { class: "pool-model" },
     h("span", {}, `${mem.size} source${mem.size === 1 ? "" : "s"}`),
     p.legacy ? h("span", { class: "hint" }, `(was ${p.legacy})`) : null, sw));
-  if (!p.deleted && !p.error) { const cs = cacheSummary(p, mem); if (cs) card.append(cs); }
+  const st = !p.deleted && !p.error ? limitStats(mem) : null;
+  if (st) {
+    const cs = cacheSummary(p, mem); if (cs) card.append(cs);
+    const ls = limitSummary(st, mem); if (ls) card.append(ls);
+  }
 
   const list = h("div", { class: "members" });
   if (!mem.size) list.append(h("div", { class: "empty-members" }, "No account or key serves this model yet. Drop one here or add it below."));
@@ -808,16 +881,24 @@ function poolCard(p) {
             const o = h("option", { value: v }, label); if (c && c.level === v) o.selected = true; return o;
           })));
     const nocache = c && c.level === "none";
-    list.append(h("div", { class: "member" + (isNew ? " new" : "") + (nocache ? " nocache" : ""), title: srcLabel(s) },
+    const lim = st ? st.per.get(sid) : null;
+    const limEl = !st ? null : lim
+      ? h("span", { class: "lim", title: `Context window / output limit${lim.cfg ? " (window from max-context-length in CPA's config)" : ""}, from CPA's model catalog.` },
+          `${lim.ctx ? fmtTok(lim.ctx) : "?"} / ${lim.out ? fmtTok(lim.out) : "?"}`)
+      : h("span", { class: "lim", title: "CPA has no catalog entry for this model on this provider." }, "limits unknown");
+    const lowWhy = limitWarning(st, sid);
+    list.append(h("div", { class: "member" + (isNew ? " new" : "") + (nocache ? " nocache" : lowWhy ? " lowlimit" : ""), title: srcLabel(s) },
       h("i", { class: "dot", style: `background:${prov(s.provider).color}` }),
       h("div", { style: "min-width:0" },
-        h("div", { class: "model" }, model, " ", direct ? h("span", { class: "badge direct" }, "direct") : null),
+        h("div", { class: "model" }, model, " ", direct ? h("span", { class: "badge direct" }, "direct") : null, limEl),
         h("div", { class: "src" }, srcLabel(s), s.disabled ? " (disabled)" : "", cacheEl)),
       direct
         ? h("span", { class: "lock", title: `${s.label} serves ${p.name} under that exact name, so CPA always includes it. Exclude the model on that account to leave it out.` }, "always in")
         : h("button", { class: "btn ghost danger", title: "Remove from pool", disabled: p.deleted, onclick: leaveOut }, "✕"),
       nocache ? h("div", { class: "cache-warn" }, "Doesn't cache: every message served here pays the full price.",
-        direct ? null : h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut }, "Leave out")) : null));
+        direct ? null : h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut }, "Leave out")) : null,
+      lowWhy ? h("div", { class: "limit-warn", title: "CPA reports one member's limits for the whole pool. A conversation that lands here can hit these lower limits." }, lowWhy,
+        direct || nocache ? null : h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut }, "Leave out")) : null));
   }
   card.append(list);
   const removed = [...p.origMembers.keys()].filter((sid) => !mem.has(sid)).map(srcById).filter(Boolean);

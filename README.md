@@ -61,6 +61,8 @@ The full story, with screenshots: **[Pools for CLIProxyAPI](https://ngvoicu.dev/
 - **Switch to…** moves a whole pool to a new model version in one save.
 - **Cache levels.** Each member shows how long it keeps the prompt cache, and each pool shows a summary such as
   "cache: 5 min – 1 hour (mixed)". Members that don't cache are flagged and can be left out with one click.
+- **Limits.** Each member shows its context window and output limit, each pool the smallest of them. Members with
+  lower limits than the rest are flagged and can be left out with one click.
 - **Review before save.** Every save lists the exact changes, account by account.
 - **Nothing in the request path.** Pools are saved as CPA's own aliases. Remove the plugin and your pools keep working.
 
@@ -121,6 +123,19 @@ so it gets that member's cache; a conversation that moves to another member star
   it, *Leave out* removes it, and it doesn't rejoin automatically.
 
 The levels are information for you: the plugin doesn't change any request.
+
+### Limits
+
+Each member shows its **context window / output limit**, from CPA's model catalog for its provider (for example
+Codex `gpt-6.1-sol` 272k / 128k, Devin 1M / 64k). `max-context-length` on a key's model in CPA's config overrides the
+window. OpenAI-compatible members have no catalog entry and show *limits unknown*.
+
+- The pool shows the **smallest** known values: every member can handle a request that fits them.
+- CPA tells clients the limits of **one** member per pool (whichever it registered last), not the smallest. When members
+  differ, a long conversation can fail, or a reply end early, when it lands on a member with lower limits. Those
+  members are highlighted with *Leave out*; leaving them out makes the pool's limits consistent.
+
+Like cache levels, limits are shown only: nothing is stored and no request changes.
 
 ### Good to know
 

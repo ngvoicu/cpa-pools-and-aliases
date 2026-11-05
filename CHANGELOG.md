@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0 — 2026-11-05
+
+- Limits: each pool member shows its context window and output limit (from CPA's model catalog for its provider;
+  `max-context-length` in the config overrides the window), each pool shows the smallest values ("limits: 272k
+  context · 64k output (smallest; members differ)"), and members with lower limits than the others are flagged with a
+  one-click *Leave out*. CPA tells clients one member's limits per pool, so a long conversation can fail, or a reply
+  end early, on a member with lower limits. Members without catalog data (OpenAI-compatible) show "limits unknown".
+  Nothing is stored and no request changes.
+
 ## 1.1.0 — 2026-11-05
 
 - Cache levels: each pool member shows how long it keeps the prompt cache (Claude logins 1 hour, Claude API keys
