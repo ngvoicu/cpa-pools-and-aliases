@@ -169,6 +169,8 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
   <section id="app" class="hidden">
     <div class="toolbar">
       <select class="pick" id="newModel" style="width:260px"><option value="">Pick a model…</option></select>
+      <input type="text" id="newPrefix" placeholder="name (extra pool)" spellcheck="false" style="width:150px"
+        title="Leave empty for the model's main pool. A name such as subs creates an extra pool subs/<model> with only the members you add.">
       <button class="btn primary" id="addPool">+ Create pool</button>
       <span style="flex:1"></span>
       <span class="hint">Clients see</span>
@@ -301,6 +303,23 @@ let S = null;
 let collapsed = new Set(JSON.parse(localStorage.getItem(STORE_COLLAPSED) || "[]"));
 
 const isAliasEntry = (e) => e && e.name && e.alias && lc(e.name) !== lc(e.alias);
+// A model's main pool is named after the model; extra pools are "<name>/<model>" with hand-picked members.
+const isMain = (p) => !String(p.name || "").includes("/");
+const prefixOf = (name) => { const n = String(name || ""); return n.includes("/") ? n.slice(0, n.lastIndexOf("/")) : ""; };
+const PREFIX_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/i;
+// CPA exclusion patterns: exact ids or "*" wildcards, case-insensitive.
+function excludedBy(s, model) {
+  return (s.excluded || []).some((x) => {
+    const re = new RegExp("^" + String(x).trim().toLowerCase().replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
+    return re.test(lc(model));
+  });
+}
+// Does the source serve this exact model id right now (as loaded)?
+function servesDirect(s, model) {
+  if (s.kind === "auth") return s.live.some((id) => lc(id) === lc(model));
+  if (excludedBy(s, model)) return false;
+  return s.hadList ? hasIdentity(s.entries, model) : (S.catalogs[s.provider] || []).some((m) => lc(m) === lc(model));
+}
 // Same model across providers: ignore any "vendor/" prefix, case and punctuation
 // (devin/gpt-6-1-sol == gpt-6.1-sol, devin/muse-wonder-1-0 == muse-wonder-1.0).
 const mkey = (id) => lc(id).replace(/^.*\//, "").replace(/[^a-z0-9]/g, "");
@@ -359,6 +378,7 @@ async function load() {
       label: f.email || f.label || f.account || f.name.replace(/\.json$/i, ""),
       disabled: !!f.disabled,
       entries: clone((json && (json.model_aliases || json["model-aliases"])) || []),
+      excluded: clone((json && (json.excluded_models || json["excluded-models"])) || []).filter((x) => typeof x === "string"),
       live: models.status === "fulfilled" ? ((models.value && models.value.models) || []).map((m) => m.id).filter(Boolean) : [],
       globals: clone(globalAliases[p] || globalAliases[Object.keys(globalAliases).find((k) => lc(k) === p)] || []),
     });
@@ -378,23 +398,27 @@ async function load() {
       if (Array.isArray(g.models) || keyLevel.length === 0) {
         sources.push({ id: `apikey:${p0}:${gi}`, ref: `key:${p0}/${name}`, kind: "apikey", provider: p, providerKey: p0, gi, ki: null,
           label: name, entries: clone(g.models || []), hadList: Array.isArray(g.models) && g.models.length > 0,
+          excluded: clone(g["excluded-models"] || []),
           profile: g["fingerprint-profile"] || (keys.find(hasKey) || {})["fingerprint-profile"] || "" });
       }
       for (const { k, ki } of keyLevel) {
         sources.push({ id: `apikey:${p0}:${gi}:${ki}`, ref: `key:${p0}/${name}#${ki + 1}`, kind: "apikey", provider: p, providerKey: p0, gi, ki,
           label: name + (keys.length > 1 ? ` · key ${ki + 1}` : ""), entries: clone(k.models || []), hadList: k.models.length > 0,
+          excluded: clone(Array.isArray(k["excluded-models"]) ? k["excluded-models"] : (g["excluded-models"] || [])),
           profile: k["fingerprint-profile"] || g["fingerprint-profile"] || "" });
       }
     });
   }
   const order = { auth: 0, apikey: 1 };
   sources.sort((a, b) => byName(a.provider, b.provider) || order[a.kind] - order[b.kind] || byName(a.label, b.label));
-  for (const s of sources) s.options = optionsFor(s, catalogs);
+  const skipped = (pluginCfg && pluginCfg.skip && typeof pluginCfg.skip === "object") ? pluginCfg.skip : {};
+  for (const s of sources) s.options = optionsFor(s, catalogs, skipped, limitCat);
 
   const poolsOnly = !!(pluginCfg && pluginCfg["pools-only"] === true);
   const skip = (pluginCfg && pluginCfg.skip && typeof pluginCfg.skip === "object") ? pluginCfg.skip : {};
   const cache = (pluginCfg && pluginCfg.cache && typeof pluginCfg.cache === "object" && !Array.isArray(pluginCfg.cache)) ? pluginCfg.cache : {};
-  S = { config, pluginCfg: pluginCfg || {}, sources, pools: [], nextId: 0, catalogs, limitCat, registered,
+  const limits = (pluginCfg && pluginCfg.limits && typeof pluginCfg.limits === "object" && !Array.isArray(pluginCfg.limits)) ? pluginCfg.limits : {};
+  S = { config, pluginCfg: pluginCfg || {}, sources, pools: [], nextId: 0, catalogs, limitCat, registered, limits,
     poolsOnly, origPoolsOnly: poolsOnly, skip, cache, keyless };
   S.models = modelCatalog();
   S.pools = registered.map((r) => readPool(r));
@@ -406,7 +430,7 @@ async function load() {
 }
 
 // Upstream models a source can contribute (aliases are mapped back to the model behind them).
-function optionsFor(s, catalogs) {
+function optionsFor(s, catalogs, skipped, limitCat) {
   const out = new Map();
   const add = (name, label) => { if (name && !out.has(lc(name))) out.set(lc(name), { name, label: label || name }); };
   if (s.kind === "auth") {
@@ -414,12 +438,19 @@ function optionsFor(s, catalogs) {
     for (const e of [...s.globals, ...s.entries]) if (isAliasEntry(e)) reverse.set(lc(e.alias), e.name);
     for (const id of s.live) add(reverse.get(lc(id)) || id);
     for (const e of s.entries) if (isAliasEntry(e)) add(e.name); // hidden behind an alias (fork off)
+    for (const x of s.excluded) if (!x.includes("*")) add(x); // excluded on this account (e.g. left out of a pool)
   } else {
     for (const e of s.entries) {
       if (!e || !e.name) continue;
       add(e.name, e["display-name"] && e["display-name"] !== e.name && lc(e["display-name"]) !== lc(e.alias) ? `${e.name}  · ${e["display-name"]}` : e.name);
     }
-    if (!s.hadList) for (const m of catalogs[s.provider] || []) add(m);
+    if (!s.hadList) for (const m of catalogs[s.provider] || []) if (!excludedBy(s, m)) add(m);
+  }
+  // API keys left out of a main pool they served directly: offer the model again so it can be added back
+  // (only when the provider's catalog has that exact id; keys reaching it under another name keep that option)
+  if (s.kind === "apikey") for (const [pool, refs] of Object.entries(skipped || {})) {
+    if (Array.isArray(refs) && refs.includes(s.ref) && !pool.includes("/") &&
+      ((limitCat && limitCat[s.provider]) || []).some((m) => lc(m.id) === lc(pool)) && !excludedBy(s, pool)) add(pool);
   }
   return [...out.values()].sort((a, b) => byName(a.name, b.name));
 }
@@ -454,6 +485,7 @@ function readPool(r) {
   for (const s of S.sources) {
     const e = s.entries.find((x) => isAliasEntry(x) && lc(x.alias) === lc(name));
     if (e) members.set(s.id, e.name);
+    else if (!name.includes("/") && servesDirect(s, name)) members.set(s.id, (s.options.find((o) => lc(o.name) === lc(name)) || { name }).name);
   }
   const sk = Array.isArray(S.skip[name]) ? S.skip[name].filter((x) => typeof x === "string") : [];
   const raw = S.cache[name] && typeof S.cache[name] === "object" ? S.cache[name] : {};
@@ -465,18 +497,20 @@ function readPool(r) {
 
 // Pools from v0.3 and earlier have free names ("zeus"). Rename them to their model id. Pools that mix models or have no members can't be converted automatically.
 function migrateLegacy() {
-  const taken = new Set();
-  for (const p of S.pools) if (S.models.has(mkey(p.name)) && [...p.members.values()].every((m) => mkey(m) === mkey(p.name))) taken.add(mkey(p.name));
+  const taken = new Set(S.pools.map((p) => lc(p.name)));
   for (const p of S.pools) {
     const keys = new Set([...p.members.values()].map(mkey));
     if (S.models.has(mkey(p.name)) && [...keys].every((k) => k === mkey(p.name))) continue; // already a model pool
     if (keys.size === 1) {
       const k = [...keys][0];
-      if (taken.has(k)) { p.error = `Another pool already serves ${S.models.get(k)?.id || k}. Delete one of them.`; continue; }
-      taken.add(k);
+      const id = (S.models.get(k) || { id: [...p.members.values()][0].replace(/^.*\//, "") }).id;
+      // the model's main pool exists already: keep this one as an extra pool named after the old name
+      const next = taken.has(lc(id)) ? `${lc(p.name).replace(/[^a-z0-9_-]/g, "-")}/${id}` : id;
+      if (taken.has(lc(next))) { p.error = `Another pool is already called ${next}. Delete one of them.`; continue; }
+      taken.add(lc(next));
       p.legacy = p.name;
       p.oldLabel = p.oldLabel || p.name;
-      p.name = (S.models.get(k) || { id: [...p.members.values()][0].replace(/^.*\//, "") }).id;
+      p.name = next;
     } else if (!keys.size) p.error = "This pool has no models. Pick one with “Switch to…”, or delete it.";
     else p.error = `This pool mixes ${keys.size} different models. A pool holds one model: remove members until one model is left, or delete it.`;
   }
@@ -485,13 +519,13 @@ function migrateLegacy() {
 // Every source that offers the pool's model is a member unless it was removed from the pool before
 // (plugins.configs.<id>.skip). New accounts and keys therefore join on the next visit to this page.
 function autoJoin(p) {
-  if (p.deleted || p.error) return 0;
+  if (p.deleted || p.error || !isMain(p)) return 0; // extra pools keep the members you picked
   const key = mkey(p.name), cur = members(p);
   let n = 0;
   for (const s of S.sources) {
     if (cur.has(s.id) || p.skip.has(s.ref) || p.cache.get(s.ref) === "none") continue;
     const o = optionFor(s, key, p.name);
-    if (!o || isDirect(p, o.name)) continue;
+    if (!o || isDirect(p, o.name)) continue; // direct members are read at load; hidden ones stay out
     p.members.set(s.id, o.name); p.auto.add(s.id); n++;
   }
   return n;
@@ -545,7 +579,7 @@ function cacheSummary(p, mem) {
     const sorted = [...new Set(levels)].sort((a, b) => CACHE_RANK[a] - CACHE_RANK[b]);
     const lo = sorted[0], hi = sorted[sorted.length - 1];
     parts.push(lo === hi
-      ? h("span", { title: "Every member with a known level keeps the cache this long." }, `cache: ${cacheLabel(lo)}`)
+      ? h("span", { title: "Every member with a known level keeps the cache this long. With every level set, model lists report it so clients (pi) refresh caches on that schedule." }, `cache: ${cacheLabel(lo)}`)
       : h("span", { title: `Each conversation stays on one member and gets that member's cache. Clients that refresh caches have to plan for the shortest (${cacheLabel(lo)}).` },
           `cache: ${cacheLabel(lo)} – ${cacheLabel(hi)} (mixed)`));
   }
@@ -595,15 +629,56 @@ function limitSummary(st, mem) {
   const parts = [];
   if (st.minCtx || st.minOut) {
     const mixed = isLower(st.minCtx, st.maxCtx) || isLower(st.minOut, st.maxOut);
-    const text = `limits: ${st.minCtx ? fmtTok(st.minCtx) : "?"} context · ${st.minOut ? fmtTok(st.minOut) : "?"} output`;
+    const text = `clients see: ${st.minCtx ? fmtTok(st.minCtx) : "?"} context · ${st.minOut ? fmtTok(st.minOut) : "?"} output`;
     parts.push(mixed
-      ? h("span", { class: "lowl", title: "The smallest limits among members with known values. CPA tells clients the limits of one member only, so a long conversation can fail, or a reply end early, when it lands on a member with lower limits. Leave those out to keep the pool consistent." },
+      ? h("span", { class: "lowl", title: "The smallest limits among members with known values; model lists report these for the pool. Members with higher limits can't use them fully. Leave out the lower ones, or put them in an extra pool, if you need more." },
           `${text} (smallest; members differ)`)
-      : h("span", { title: "Every member with known limits allows this much." }, text));
+      : h("span", { title: "Model lists report these limits for the pool; every member with known limits allows this much." }, text));
   }
   if (st.unknown.length) parts.push(h("span", { class: "unk", title: "CPA has no catalog entry for this model on these members (e.g. OpenAI-compatible providers). max-context-length on the model in CPA's config sets its window." },
     `${st.unknown.length} limit${st.unknown.length === 1 ? "" : "s"} unknown`));
   return parts.length ? h("div", { class: "pool-cache" }, ...parts) : null;
+}
+// What clients are told about each pool: the smallest known context window and output limit, and the cache
+// lifetime when every member's level is known and caches (the shortest wins). Stored in plugins.configs.<id>.limits;
+// the plugin writes it into model lists, so it no longer depends on which member CPA registered last.
+const CACHE_SECONDS = { "5m": 300, "30m": 1800, "1h": 3600, long: 3600 };
+function poolCacheTtl(p, mem) {
+  let ttl = 0;
+  for (const sid of mem.keys()) {
+    const c = cacheOf(p, srcById(sid));
+    if (!c || c.level === "none") return 0;
+    const v = CACHE_SECONDS[c.level];
+    ttl = ttl ? Math.min(ttl, v) : v;
+  }
+  return ttl;
+}
+function poolLimits(p) {
+  const mem = members(p);
+  if (!mem.size) return null;
+  const st = limitStats(mem);
+  const out = {};
+  if (st.minCtx) out.context = st.minCtx;
+  if (st.minOut) out.output = st.minOut;
+  const ttl = poolCacheTtl(p, mem);
+  if (ttl) out["cache-ttl"] = ttl;
+  return Object.keys(out).length ? out : null;
+}
+function normLimits(m) {
+  const out = {};
+  for (const name of Object.keys(m || {}).sort(byName)) {
+    const v = m[name];
+    if (!v || typeof v !== "object") continue;
+    const e = {};
+    for (const k of ["context", "output", "cache-ttl"]) if (Number(v[k]) > 0) e[k] = Number(v[k]);
+    if (Object.keys(e).length) out[name] = e;
+  }
+  return out;
+}
+function limitsMap() {
+  const out = {};
+  for (const p of S.pools) if (!p.deleted && !p.error) { const l = poolLimits(p); if (l) out[p.name] = l; }
+  return normLimits(out);
 }
 function limitWarning(st, sid) {
   const l = st && st.per.get(sid);
@@ -621,17 +696,16 @@ function skipMap() {
 
 // Effective members: the pool's own entries plus every source that serves the exact model id
 // directly; CPA includes those automatically, so they can't be removed here.
+// Sources CPA includes in a main pool on its own because they serve the exact id.
 function directSources(p) {
-  return S.sources.filter((s) => s.options.some((o) => lc(o.name) === lc(p.name)));
+  return isMain(p) ? S.sources.filter((s) => servesDirect(s, p.name)) : [];
 }
+// Members are explicit: direct ones (read at load) plus aliases. Removing a direct member hides the model on it.
 function members(p) {
-  const out = new Map();
-  if (p.error) { for (const [sid, m] of p.members) out.set(sid, m); return out; }
-  for (const s of directSources(p)) out.set(s.id, s.options.find((o) => lc(o.name) === lc(p.name)).name);
-  for (const [sid, m] of p.members) if (!out.has(sid)) out.set(sid, m);
-  return out;
+  return new Map(p.members);
 }
-const isDirect = (p, model) => lc(model) === lc(p.name);
+const isDirect = (p, model) => isMain(p) && lc(model) === lc(p.name);
+const mainPool = (name) => S.pools.find((q) => !q.deleted && !q.error && isMain(q) && lc(q.name) === lc(name));
 function isIdentity(e, model) {
   return e && e.name && lc(e.name) === lc(model) && lc(e.alias || e.name) === lc(model);
 }
@@ -648,7 +722,9 @@ const stripOldName = (e, old) => {
 };
 const srcById = (id) => S.sources.find((s) => s.id === id);
 const srcLabel = (s) => `${prov(s.provider).label}${s.kind === "apikey" ? " API key" : ""} · ${s.label}`;
-const poolOf = (key, self) => S.pools.find((p) => p !== self && !p.deleted && !p.error && mkey(p.name) === key);
+// The model's main pool (several pools may serve one model, but only one is named after it).
+const poolOf = (key, self) => S.pools.find((p) => p !== self && !p.deleted && !p.error && isMain(p) && mkey(p.name) === key);
+const poolByName = (name, self) => S.pools.find((p) => p !== self && !p.deleted && lc(p.name) === lc(name));
 
 // ------------------------------------------------------------------ diff / plan
 function plan() {
@@ -658,21 +734,28 @@ function plan() {
   const touched = new Map();
   const eff = new Map(S.pools.map((p) => [p.id, p.deleted ? new Map() : members(p)]));
   const old = oldNames();
+  const touchedExcl = new Map();
   for (const s of S.sources) {
     let dirty = false;
     const where = srcLabel(s);
     const removedModels = [];
+    const droppedDirect = new Set(); // main-pool ids this source stops serving directly
     for (const p of S.pools) {
-      const b = p.origName ? p.origMembers.get(s.id) : undefined; // alias entry before
+      let b = p.origName ? p.origMembers.get(s.id) : undefined; // member before
       const a = eff.get(p.id).get(s.id);
       const renamed = !!p.origName && p.origName !== p.name;
-      const needsWrite = a && (!isDirect(p, a) || (s.kind === "apikey" && !hasIdentity(s.entries, a)));
+      // a direct member of a deleted or renamed main pool keeps serving the model on its own: nothing to write
+      if (b && isMain({ name: p.origName }) && lc(b) === lc(p.origName) && (p.deleted || renamed)) b = undefined;
+      if (b && !a && isDirect(p, b)) droppedDirect.add(lc(p.name));
+      const needsWrite = a && (!isDirect(p, a) || (s.kind === "apikey" && !hasIdentity(s.entries, a)) || (s.kind === "auth" && !servesDirect(s, a)));
       const stale = (s.entries || []).some((e) => (isIdentity(e, p.name) || (isAliasEntry(e) && lc(e.alias) === lc(p.origName || p.name))) &&
         stripOldName(e, old) !== e);
       if (!b && !needsWrite && !stale) continue;
       if (b && a && b === a && !renamed && !stale) continue;
       dirty = true;
-      if (b && !a) removedModels.push(b);
+      if (b && !a && !isDirect(p, b)) removedModels.push(b);
+      if (b && !a && isDirect(p, b)) { changes.push({ t: "del", text: `− ${p.name} ← ${b}  (stops serving it directly)`, where }); continue; }
+      if (!b && a && isDirect(p, a)) { changes.push({ t: "add", text: `+ ${p.name} ← ${a}  (direct)`, where }); continue; }
       if (!b && !needsWrite) changes.push({ t: "mod", text: `~ ${p.name}: drop old name “${[...old].find((n) => (s.entries || []).some((e) => lc(e["display-name"]) === n)) || ""}”`, where });
       else if (!b) changes.push({ t: "add", text: `+ ${p.name} ← ${a}${p.auto.has(s.id) ? "  (new source)" : ""}`, where });
       else if (!a) changes.push({ t: "del", text: `− ${p.origName} ← ${b}`, where });
@@ -684,7 +767,8 @@ function plan() {
     let entries = (Array.isArray(s.entries) ? s.entries : []).filter((e) => {
       if (isAliasEntry(e) && managed.has(lc(e.alias))) { templates.set(lc(e.alias), stripOldName(e, old)); return false; }
       return true;
-    }).map((e) => (S.pools.some((p) => isIdentity(e, p.name)) ? stripOldName(e, old) : e));
+    }).map((e) => (S.pools.some((p) => isIdentity(e, p.name)) ? stripOldName(e, old) : e))
+      .filter((e) => !(s.kind === "apikey" && e && e.name && droppedDirect.has(lc(e.name)) && lc(e.alias || e.name) === lc(e.name)));
     for (const p of S.pools) {
       const model = eff.get(p.id).get(s.id);
       if (!model) continue;
@@ -699,16 +783,36 @@ function plan() {
       }
       const tpl = (p.origName && templates.get(lc(p.origName))) || {};
       const entry = { ...tpl, name: model, alias: p.name };
-      if (s.kind === "auth" && entry.fork === undefined && !tpl.name) entry.fork = true; // keep its own name too
+      if (s.kind === "auth") {
+        // An account keeps its plain model name while any alias keeps it (fork). When that name is a main pool,
+        // fork follows membership there: off hides the account from the main pool, on keeps it in.
+        const main = mainPool(model);
+        if (main) entry.fork = eff.get(main.id).has(s.id);
+        else if (entry.fork === undefined && !tpl.name) entry.fork = true;
+      }
       entries.push(entry);
     }
     // an API key that only served a model through a pool alias keeps serving it under its own name
     if (s.kind === "apikey" && s.hadList) for (const m of removedModels) if (!hasIdentity(entries, m)) entries.unshift({ name: m, alias: m });
-    if (s.kind === "apikey" && !s.hadList && entries.length) {
-      const seed = (S.catalogs[s.provider] || []).filter((m) => !hasIdentity(entries, m)).map((m) => ({ name: m, alias: m }));
+    if (s.kind === "apikey" && !s.hadList) {
+      const seed = (S.catalogs[s.provider] || []).filter((m) => !hasIdentity(entries, m) && !droppedDirect.has(lc(m)) && !excludedBy(s, m))
+        .map((m) => ({ name: m, alias: m }));
       entries = [...seed, ...entries];
       notes.push(`${s.label}: this key had no model list, so it served every default ${prov(s.provider).label} model. ` +
         `${seed.length ? `Its ${seed.length} default models are written explicitly so it keeps serving them.` : "After saving it will only serve the pooled models."}`);
+    }
+    if (s.kind === "auth") {
+      // accounts: a model left out of its main pool and not kept by any alias is excluded on the account;
+      // a model back in its main pool loses that exclusion (aliases need the model too)
+      let excl = [...s.excluded];
+      for (const p of S.pools) {
+        if (p.deleted || p.error || !isMain(p) || !s.options.some((o) => lc(o.name) === lc(p.name))) continue;
+        const member = eff.get(p.id).has(s.id);
+        const aliased = entries.some((e) => isAliasEntry(e) && lc(e.name) === lc(p.name));
+        if (member || aliased) excl = excl.filter((x) => lc(x) !== lc(p.name));
+        else if (droppedDirect.has(lc(p.name)) && !excl.some((x) => lc(x) === lc(p.name))) excl.push(p.name);
+      }
+      if (JSON.stringify(excl) !== JSON.stringify(s.excluded)) touchedExcl.set(s.id, excl);
     }
     touched.set(s.id, entries);
   }
@@ -722,7 +826,7 @@ function plan() {
   }
   for (const p of S.pools) if (!p.isNew && p.deleted) {
     if (!changes.some((c) => c.text.startsWith(`− ${p.origName} `))) changes.push({ t: "del", text: `− pool ${p.origName}`, where: "" });
-    if (directSources(p).length) notes.push(`Deleting ${p.name} removes its aliases only. ${directSources(p).map((s) => s.label).join(", ")} keep serving ${p.name} directly.`);
+    if (directSources({ name: p.origName }).length) notes.push(`Deleting ${p.origName} removes its aliases only. ${directSources({ name: p.origName }).map((s) => s.label).join(", ")} keep serving ${p.origName} directly.`);
   }
   if (registryChanged && !changes.length) changes.push({ t: "mod", text: S.registered.some((r) => r.label && r.label !== r.name) ? "~ pool list: drop old names" : "~ pool list", where: "" });
   const legacy = S.pools.filter((p) => p.legacy && !p.deleted);
@@ -761,13 +865,19 @@ function plan() {
       "Conversations served there pay the full price on every message; consider leaving them out.");
   }
   if (cacheChanged && !changes.some((c) => c.text.includes(": cache "))) changes.push({ t: "mod", text: "~ cache levels", where: "" });
+  const limitsNow = limitsMap();
+  const limitsChanged = JSON.stringify(limitsNow) !== JSON.stringify(normLimits(S.limits));
+  if (limitsChanged) changes.push({ t: "mod", text: "~ limits and cache lifetimes reported to clients", where: "" });
+  const dropped = changes.filter((c) => c.text.includes("(stops serving it directly)"));
+  if (dropped.length) notes.push("Left-out direct members stop serving the model under its own name: an API key drops it from its model list, " +
+    "an account keeps it only through its extra-pool aliases, or gets it excluded. Add them back here to undo.");
   const seeChanged = S.poolsOnly !== S.origPoolsOnly;
   if (seeChanged) {
     changes.push({ t: "mod", text: `~ clients see: ${S.poolsOnly ? "pools only" : "pools and models"}`, where: "" });
     if (S.poolsOnly) notes.push("Pools only hides every other model from model lists. Clients that already know a model's " +
       "name can still use it; to retire a model completely, remove or exclude it in CPA.");
   }
-  return { changes, notes, touched, names, registryChanged, seeChanged, errors, skipNow, skipChanged, cacheNow, cacheChanged };
+  return { changes, notes, touched, touchedExcl, names, registryChanged, seeChanged, errors, skipNow, skipChanged, cacheNow, cacheChanged, limitsNow, limitsChanged };
 }
 
 // ------------------------------------------------------------------ render
@@ -800,10 +910,10 @@ function renderNewModel() {
   const cur = sel.value;
   sel.replaceChildren(h("option", { value: "" }, "Pick a model…"));
   for (const e of [...S.models.values()].sort((a, b) => byName(a.id, b.id))) {
-    const used = poolOf(e.key);
-    sel.append(h("option", { value: e.key, disabled: !!used }, modelOptionLabel(e) + (used ? `  (pool ${used.name})` : "")));
+    const n = S.pools.filter((p) => !p.deleted && !p.error && mkey(p.name) === e.key).length;
+    sel.append(h("option", { value: e.key }, modelOptionLabel(e) + (n ? `  (${n} pool${n === 1 ? "" : "s"})` : "")));
   }
-  sel.value = cur && !poolOf(cur) ? cur : "";
+  sel.value = cur || "";
 }
 
 function renderSee() {
@@ -851,7 +961,7 @@ function poolCard(p) {
     onchange: (ev) => { if (ev.target.value) switchModel(p, ev.target.value); } }, h("option", { value: "" }, "Switch to…"));
   for (const e of [...S.models.values()].sort((a, b) => byName(a.id, b.id))) {
     if (e.key === mkey(p.name) && !p.error) continue;
-    const used = poolOf(e.key, p);
+    const used = poolByName(prefixOf(p.name) ? `${prefixOf(p.name)}/${e.id}` : e.id, p);
     sw.append(h("option", { value: e.key, disabled: !!used }, modelOptionLabel(e) + (used ? `  (pool ${used.name})` : "")));
   }
   if (p.error && !p.deleted) card.append(h("div", { class: "pool-err" }, p.error));
@@ -895,16 +1005,15 @@ function poolCard(p) {
       h("div", { style: "min-width:0" },
         h("div", { class: "model" }, model, " ", direct ? h("span", { class: "badge direct" }, "direct") : null, limEl),
         h("div", { class: "src" }, srcLabel(s), s.disabled ? " (disabled)" : "", cacheEl)),
-      direct
-        ? h("span", { class: "lock", title: `${s.label} serves ${p.name} under that exact name, so CPA always includes it. Exclude the model on that account to leave it out.` }, "always in")
-        : h("button", { class: "btn ghost danger", title: "Remove from pool", disabled: p.deleted, onclick: leaveOut }, "✕"),
+      h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut,
+        title: direct ? `Remove from pool. ${s.label} serves ${p.name} under that exact name, so saving makes it stop: an API key drops it from its model list; an account keeps it only through extra-pool aliases, or gets it excluded.` : "Remove from pool" }, "✕"),
       nocache ? h("div", { class: "cache-warn" }, "Doesn't cache: every message served here pays the full price.",
-        direct ? null : h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut }, "Leave out")) : null,
+        h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut }, "Leave out")) : null,
       lowWhy ? h("div", { class: "limit-warn", title: "CPA reports one member's limits for the whole pool. A conversation that lands here can hit these lower limits." }, lowWhy,
-        direct || nocache ? null : h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut }, "Leave out")) : null));
+        nocache ? null : h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut }, "Leave out")) : null));
   }
   card.append(list);
-  const removed = [...p.origMembers.keys()].filter((sid) => !mem.has(sid)).map(srcById).filter(Boolean);
+  const removed = p.origName === p.name ? [...p.origMembers.keys()].filter((sid) => !mem.has(sid)).map(srcById).filter(Boolean) : [];
   if (removed.length && !p.deleted) card.append(h("div", { class: "removed" }, "removed: " + removed.map((s) => s.label).join(", ")));
   const left = [...p.skip].map((ref) => S.sources.find((x) => x.ref === ref)).filter((x) => x && !mem.has(x.id) && !removed.includes(x));
   if (left.length && !p.deleted) card.append(h("div", { class: "hint", style: "margin-top:6px" }, "left out: " + left.map((x) => x.label).join(", ")));
@@ -931,7 +1040,7 @@ function renderSources() {
   const q = lc($("search").value);
   const body = $("sources");
   body.replaceChildren();
-  const pooled = new Map(S.pools.filter((p) => !p.deleted && !p.error).map((p) => [mkey(p.name), p]));
+  const pooled = new Map(S.pools.filter((p) => !p.deleted && !p.error && isMain(p)).map((p) => [mkey(p.name), p]));
   for (const s of S.sources) {
     const opts = s.options.filter((o) => !q || lc(o.label).includes(q) || lc(s.label).includes(q) || lc(s.provider).includes(q));
     if (!opts.length) continue;
@@ -978,7 +1087,6 @@ function addMember(p, sid, model) {
     return;
   }
   const cur = members(p).get(sid);
-  if (cur && isDirect(p, cur)) { toast(`${srcLabel(s)} already serves ${p.name} directly.`); return; }
   if (cur === model) return;
   p.members.set(sid, model);
   p.skip.delete(s.ref);
@@ -987,23 +1095,29 @@ function addMember(p, sid, model) {
 
 function switchModel(p, key) {
   const e = S.models.get(key);
-  if (!e || poolOf(key, p)) return;
+  if (!e) return;
+  const prefix = prefixOf(p.name);
+  const nextName = prefix ? `${prefix}/${e.id}` : e.id;
+  if (poolByName(nextName, p)) { toast(`There is already a pool called ${nextName}.`, true); return; }
   const before = members(p);
   const next = new Map();
   let dropped = 0;
   for (const sid of before.keys()) if (!optionFor(srcById(sid), key, e.id)) dropped++;
   for (const s of S.sources) {
+    if (prefix && !before.has(s.id)) continue; // extra pools keep their hand-picked members
     if (p.skip.has(s.ref) && !before.has(s.id)) continue;
     const o = optionFor(s, key, e.id);
-    if (o) next.set(s.id, o.name);
+    if (!o) continue;
+    if (!prefix && lc(o.name) === lc(e.id) && !servesDirect(s, e.id)) continue; // hidden or excluded there
+    next.set(s.id, o.name);
   }
   const oldName = p.name;
   const sk = S.skip[oldName];
-  if (sk) { S.skip = { ...S.skip }; delete S.skip[oldName]; S.skip[e.id] = sk; }
-  p.name = e.id;
-  p.members = new Map([...next].filter(([, m]) => !isDirect(p, m)));
+  if (sk) { S.skip = { ...S.skip }; delete S.skip[oldName]; S.skip[nextName] = sk; }
+  p.name = nextName;
+  p.members = next;
   p.error = null;
-  const msg = `Pool ${oldName} now serves ${e.id}.`;
+  const msg = `Pool ${oldName} is now ${nextName}.`;
   toast(dropped ? `${msg} ${dropped} member${dropped === 1 ? " doesn't" : "s don't"} offer it and left the pool.` : msg);
   render();
 }
@@ -1012,15 +1126,29 @@ function addPool() {
   const key = $("newModel").value;
   const e = S.models.get(key);
   if (!e) { toast("Pick a model first", true); return; }
-  if (poolOf(key)) { toast(`${e.id} already has a pool`, true); return; }
-  const p = { id: "p" + (S.nextId++), name: e.id, origName: null, skip: new Set(), origSkip: new Set(), auto: new Set(),
+  const prefix = $("newPrefix").value.trim();
+  if (prefix && !PREFIX_RE.test(prefix)) { toast("Use letters, digits, - or _ for the name (e.g. subs).", true); return; }
+  // a prefix that is also a provider namespace ("devin/…") would collide with CPA's own model names
+  if (prefix && S.sources.some((s) => s.options.some((o) => lc(o.name).startsWith(lc(prefix) + "/")))) {
+    toast(`${prefix}/ is already used by model names in CPA. Pick another name.`, true); return;
+  }
+  const name = prefix ? `${prefix}/${e.id}` : e.id;
+  if (poolByName(name)) {
+    toast(prefix ? `There is already a pool called ${name}.` : `${e.id} already has its main pool. Give the new one a name (e.g. subs) to create an extra pool.`, true);
+    return;
+  }
+  const p = { id: "p" + (S.nextId++), name, origName: null, skip: new Set(), origSkip: new Set(), auto: new Set(),
     cache: new Map(), origCache: new Map(), members: new Map(), origMembers: new Map(), deleted: false, isNew: true, error: null };
-  for (const sid of e.sources) {
-    const o = optionFor(srcById(sid), key, e.id);
-    if (o && !isDirect(p, o.name)) p.members.set(sid, o.name);
+  if (!prefix) {
+    for (const sid of e.sources) {
+      const s = srcById(sid);
+      const o = optionFor(s, key, e.id);
+      if (o && (!isDirect(p, o.name) || servesDirect(s, o.name))) p.members.set(sid, o.name);
+    }
   }
   S.pools.push(p);
-  $("newModel").value = "";
+  $("newModel").value = ""; $("newPrefix").value = "";
+  if (prefix) toast(`Extra pool ${name} created. Add the accounts and keys it should use.`);
   render();
 }
 
@@ -1034,13 +1162,16 @@ function openReview() {
 }
 
 async function save() {
-  const { touched, names, registryChanged, seeChanged, skipNow, skipChanged, cacheNow, cacheChanged } = plan();
+  const { touched, touchedExcl, names, registryChanged, seeChanged, skipNow, skipChanged, cacheNow, cacheChanged, limitsNow, limitsChanged } = plan();
   const btn = $("confirmSave");
   btn.disabled = true; btn.replaceChildren(h("span", { class: "spin" }), " Saving…");
   const errors = [];
   try {
-    for (const s of S.sources.filter((x) => x.kind === "auth" && touched.has(x.id))) {
-      try { await api("PATCH", "/credentials/fields", { name: s.file, model_aliases: touched.get(s.id) }); }
+    for (const s of S.sources.filter((x) => x.kind === "auth" && (touched.has(x.id) || touchedExcl.has(x.id)))) {
+      const fields = { name: s.file };
+      if (touched.has(s.id)) fields.model_aliases = touched.get(s.id);
+      if (touchedExcl.has(s.id)) fields.excluded_models = touchedExcl.get(s.id);
+      try { await api("PATCH", "/credentials/fields", fields); }
       catch (e) { errors.push(e.message); }
     }
     const byProvider = new Map();
@@ -1065,6 +1196,9 @@ async function save() {
     }
     if (cacheChanged && errors.length === 0) {
       try { await api("PUT", `/config/plugins/configs/${PLUGIN_ID}/cache`, cacheNow); } catch (e) { errors.push(e.message); }
+    }
+    if (limitsChanged && errors.length === 0) {
+      try { await api("PUT", `/config/plugins/configs/${PLUGIN_ID}/limits`, limitsNow); } catch (e) { errors.push(e.message); }
     }
     if (seeChanged && errors.length === 0) {
       try { await api("PUT", `/config/plugins/configs/${PLUGIN_ID}/pools-only`, S.poolsOnly); } catch (e) { errors.push(e.message); }

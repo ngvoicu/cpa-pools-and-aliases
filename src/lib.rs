@@ -7,6 +7,11 @@
 //!    carry whichever member's provider/harness label CPA happened to pick, e.g.
 //!    "Claude Opus 5.5 (Devin)". Pool entries show their plain model id instead.
 //!
+//! 3. Reports each pool's limits in those lists: the context window, output limit and prompt-cache
+//!    lifetime the page stored (plugins.configs.cpa-pools-and-aliases.limits). CPA itself keeps the
+//!    metadata of whichever member it registered last, so without this a pool's limits change with
+//!    registration order.
+//!
 //! Pools come from the plugin's own config (plugins.configs.cpa-pools-and-aliases.pools), which
 //! CPA hands to the plugin on plugin.register / plugin.reconfigure.
 
@@ -126,6 +131,15 @@ struct Settings {
     pools: HashMap<String, String>,
     /// model lists show only the pools (requests for other models still work)
     pools_only: bool,
+    /// lower-cased pool id -> limits reported for the pool
+    limits: HashMap<String, Limits>,
+}
+
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+struct Limits {
+    context: Option<u64>,
+    output: Option<u64>,
+    cache_ttl: Option<u64>,
 }
 
 fn settings() -> &'static RwLock<Settings> {
@@ -154,7 +168,23 @@ fn parse_settings(yaml: &[u8]) -> Settings {
     Settings {
         pools: parse_pools(&doc),
         pools_only: doc.get("pools-only").and_then(|v| v.as_bool()).unwrap_or(false),
+        limits: parse_limits(&doc),
     }
+}
+
+/// `limits: {<pool>: {context: 922000, output: 64000, cache-ttl: 3600}}`; missing or invalid values are skipped.
+fn parse_limits(doc: &serde_yaml::Value) -> HashMap<String, Limits> {
+    let mut out = HashMap::new();
+    let Some(map) = doc.get("limits").and_then(|v| v.as_mapping()) else { return out };
+    let num = |v: &serde_yaml::Value, k: &str| v.get(k).and_then(|x| x.as_u64()).filter(|n| *n > 0);
+    for (k, v) in map {
+        let Some(name) = k.as_str().map(str::trim).filter(|s| !s.is_empty()) else { continue };
+        let l = Limits { context: num(v, "context"), output: num(v, "output"), cache_ttl: num(v, "cache-ttl") };
+        if l != Limits::default() {
+            out.insert(name.to_lowercase(), l);
+        }
+    }
+    out
 }
 
 fn parse_pools(doc: &serde_yaml::Value) -> HashMap<String, String> {
@@ -276,6 +306,44 @@ fn clean_model_list(body: &mut Value, cfg: &Settings) -> bool {
             let Some(id) = model_id(obj) else { continue };
             let Some(label) = cfg.pools.get(&id.to_lowercase()) else { continue };
             changed |= set_label(obj, label);
+            if let Some(l) = cfg.limits.get(&id.to_lowercase()) {
+                changed |= set_limits(obj, l);
+            }
+        }
+    }
+    changed
+}
+
+/// Writes a pool's limits into one model-list entry, in that list's own field names:
+///   Codex clients  context_window, max_context_window, max_tokens, prompt_cache_ttl_seconds
+///   Gemini         inputTokenLimit, outputTokenLimit
+///   others         only limit fields already present (plain OpenAI lists carry none)
+fn set_limits(obj: &mut Map<String, Value>, l: &Limits) -> bool {
+    let mut changed = false;
+    let mut put = |obj: &mut Map<String, Value>, key: &str, v: Option<u64>, add: bool| {
+        let Some(v) = v else { return };
+        if !add && !obj.contains_key(key) {
+            return;
+        }
+        if obj.get(key).and_then(|x| x.as_u64()) != Some(v) {
+            obj.insert(key.into(), json!(v));
+            changed = true;
+        }
+    };
+    if obj.contains_key("slug") {
+        put(obj, "context_window", l.context, true);
+        put(obj, "max_context_window", l.context, true);
+        put(obj, "max_tokens", l.output, true);
+        put(obj, "prompt_cache_ttl_seconds", l.cache_ttl, true);
+    } else if obj.get("name").and_then(|v| v.as_str()).is_some_and(|n| n.starts_with("models/")) {
+        put(obj, "inputTokenLimit", l.context, true);
+        put(obj, "outputTokenLimit", l.output, true);
+    } else {
+        for key in ["context_length", "max_context_length", "max_input_tokens", "context_window"] {
+            put(obj, key, l.context, false);
+        }
+        for key in ["max_completion_tokens", "max_tokens", "max_output_tokens"] {
+            put(obj, key, l.output, false);
         }
     }
     changed
@@ -367,6 +435,32 @@ mod tests {
 
         let mut openai = json!({"object":"list","data":[{"id":"zeus","object":"model"}]});
         assert!(!clean_model_list(&mut openai, &t));
+    }
+
+    #[test]
+    fn writes_pool_limits_into_model_lists() {
+        let t = parse_settings(
+            b"pools: [gpt-6.1-sol, subs/claude-opus-5-5]\nlimits:\n  gpt-6.1-sol: {context: 922000, output: 64000}\n  subs/claude-opus-5-5: {context: 1000000, output: 128000, cache-ttl: 3600}\n  bad: {context: -1}\n",
+        );
+        assert_eq!(t.limits.len(), 2);
+        let mut codex = json!({"models":[
+            {"slug":"gpt-6.1-sol","display_name":"GPT","context_window":500000,"max_context_window":872000,"max_tokens":128000},
+            {"slug":"subs/claude-opus-5-5","display_name":"x"},
+            {"slug":"swe-2","context_window":262000}]});
+        assert!(clean_model_list(&mut codex, &t));
+        let m = &codex["models"];
+        assert_eq!((m[0]["context_window"].as_u64(), m[0]["max_context_window"].as_u64(), m[0]["max_tokens"].as_u64()), (Some(922000), Some(922000), Some(64000)));
+        assert!(m[0].get("prompt_cache_ttl_seconds").is_none());
+        assert_eq!(m[1]["prompt_cache_ttl_seconds"], 3600);
+        assert_eq!(m[1]["max_tokens"], 128000);
+        assert_eq!(m[2]["context_window"], 262000);
+        let mut gemini = json!({"models":[{"name":"models/gpt-6.1-sol","displayName":"gpt-6.1-sol","inputTokenLimit":1000000}]});
+        assert!(clean_model_list(&mut gemini, &t));
+        assert_eq!((gemini["models"][0]["inputTokenLimit"].as_u64(), gemini["models"][0]["outputTokenLimit"].as_u64()), (Some(922000), Some(64000)));
+        // plain OpenAI entries have no limit fields: nothing is added
+        let mut openai = json!({"data":[{"id":"gpt-6.1-sol","object":"model"}]});
+        assert!(!clean_model_list(&mut openai, &t));
+        assert_eq!(openai["data"][0], json!({"id":"gpt-6.1-sol","object":"model"}));
     }
 
     #[test]

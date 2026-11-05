@@ -51,10 +51,15 @@ The full story, with screenshots: **[Pools for CLIProxyAPI](https://ngvoicu.dev/
 
 - **One model per pool.** A pool's name is the model's own id, so your tools price it, size its context and offer
   its reasoning levels as that model. Failover moves to another member, never to another model.
+- **Extra pools for the same model.** Give a pool a name and it becomes `<name>/<model>`, e.g. `subs/claude-opus-5-5`
+  with only your Claude logins next to the main `claude-opus-5-5`. Clients pick one by name; pi and the page still read
+  it as the model. Any account or key can be in several pools.
 - **Matching across providers.** The vendor prefix, case and punctuation are ignored: `devin/gpt-6-1-sol` and
   `gpt-6.1-sol` land in the same pool. Dropping a different model on a pool is refused.
 - **New accounts join on their own.** Add an account or key, open the page, and it is already in the pools for its
-  models, ready to save. Remove a member and it stays out.
+  models, ready to save. Remove a member and it stays out. Extra pools keep the members you pick.
+- **Remove any member.** Members that serve the exact id (*direct*) can be removed too: an API key drops the model
+  from its list, an account keeps it only through its extra-pool aliases, or gets it excluded. *+ Add* undoes it.
 - **Clean model lists.** In every list CPA serves (OpenAI, Claude, Gemini and Codex-style clients such as pi) a pool
   shows as its plain id, never as `Claude Opus 5.5 (Devin)`.
 - **Pools only.** One switch hides every model that isn't in a pool from model lists. Requests by name still work.
@@ -63,6 +68,8 @@ The full story, with screenshots: **[Pools for CLIProxyAPI](https://ngvoicu.dev/
   "cache: 5 min – 1 hour (mixed)". Members that don't cache are flagged and can be left out with one click.
 - **Limits.** Each member shows its context window and output limit, each pool the smallest of them. Members with
   lower limits than the rest are flagged and can be left out with one click.
+- **Consistent limits for clients.** Model lists report each pool's smallest limits, and its cache lifetime when every
+  member caches, so clients such as pi size and warm conversations correctly whichever member CPA registered last.
 - **Review before save.** Every save lists the exact changes, account by account.
 - **Nothing in the request path.** Pools are saved as CPA's own aliases. Remove the plugin and your pools keep working.
 
@@ -91,8 +98,9 @@ Your tools don't change: they keep asking for `claude-opus-5-5`, and CPA now spr
 
 ## How it works
 
-Members that already serve the exact model id are in the pool automatically (shown as *direct*); the others get an
-alias `<their model> → <pool id>`. The plugin itself only renders the page and cleans model-list display names.
+Members that already serve the exact model id are in the model's main pool automatically (shown as *direct*); the
+others get an alias `<their model> → <pool id>`. Extra pools (`<name>/<model>`) are aliases only. The plugin itself
+renders the page and rewrites pool entries in model lists (plain display name, limits, cache lifetime).
 
 | What | Saved to | Management API |
 |---|---|---|
@@ -101,6 +109,8 @@ alias `<their model> → <pool id>`. The plugin itself only renders the page and
 | Pool list | `plugins.configs.cpa-pools-and-aliases.pools` (model ids) | `PUT /v8/management/config/plugins/configs/cpa-pools-and-aliases/pools` |
 | Removed members | `plugins.configs.cpa-pools-and-aliases.skip` | same, `/skip` |
 | Cache levels you set | `plugins.configs.cpa-pools-and-aliases.cache` (pool → member → level) | same, `/cache` |
+| Limits reported to clients | `plugins.configs.cpa-pools-and-aliases.limits` (pool → `context`, `output`, `cache-ttl`) | same, `/limits` |
+| Removed direct member (account) | `excluded_models` in its credential file, or `fork: false` on its extra-pool aliases | `PATCH …/credentials/fields` |
 | *Pools only* | `plugins.configs.cpa-pools-and-aliases.pools-only` | same, `/pools-only` |
 
 Aliases for names that aren't pools are never shown or changed. Deleting a pool removes only the aliases it
@@ -132,18 +142,23 @@ window. OpenAI-compatible members have no catalog entry and show *limits unknown
 
 - The pool shows the **smallest** known values: every member can handle a request that fits them.
 - Differences under 10% (1.01M next to 1.05M) aren't flagged.
-- CPA tells clients the limits of **one** member per pool (whichever it registered last), not the smallest. When members
-  differ, a long conversation can fail, or a reply end early, when it lands on a member with lower limits. Those
-  members are highlighted with *Leave out*; leaving them out makes the pool's limits consistent.
+- CPA on its own tells clients the limits of **one** member per pool (whichever it registered last). Saving stores each
+  pool's smallest limits, and the plugin writes them into every model list (Codex-style `context_window`,
+  `max_context_window`, `max_tokens`; Gemini `inputTokenLimit`, `outputTokenLimit`), so they no longer change with
+  registration order. Members with lower limits are highlighted with *Leave out*, or move the others to an extra pool.
+- **Cache lifetime:** when every member's cache level is known and none is *no cache*, Codex-style lists also carry
+  `prompt_cache_ttl_seconds` (the shortest level; *longer* counts as 1 hour). pi's CPA extension uses it instead of
+  its catalog value, so a pool of Claude logins (1 hour) isn't refreshed every few minutes.
 
-Like cache levels, limits are shown only: nothing is stored and no request changes.
+No request changes: the limits are what clients are told.
 
 ### Good to know
 
 - **API keys without a model list** serve every default model of their provider. Adding a pool member writes those
   defaults into the list so the key keeps serving them; the review tells you.
-- **Direct members can't be removed here**, because CPA includes them automatically. Exclude the model on that
-  account in CPA instead.
+- **Removing a direct member** makes that account or key stop serving the model under its own name (it is the pool's
+  id). An account that is also in an extra pool keeps serving it there. Deleting or switching a pool never hides
+  anything.
 - **Prompt caches belong to accounts.** A request that moves to another member starts cold; turn on CPA's session
   affinity so a conversation stays on one account.
 - **The management key.** The page uses the normal `/v8/management` API. If you saved your key in the console
