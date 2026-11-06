@@ -255,6 +255,10 @@ const PROVIDERS = {
 const prov = (p) => PROVIDERS[p] || { label: p, color: "#888" };
 const lc = (s) => String(s || "").trim().toLowerCase();
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+// JSON with object keys sorted at every level. CPA returns stored maps in its own key order, so comparing
+// what is saved with what would be saved must not depend on order.
+const canon = (v) => JSON.stringify(v, (_, x) => (x && typeof x === "object" && !Array.isArray(x)
+  ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, x[k]])) : x));
 const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true });
 
 // ------------------------------------------------------------------ dom
@@ -939,7 +943,7 @@ function plan() {
   if (old.size && !legacy.length) notes.push("Pool names are gone: clients see each pool as its model id. " +
     "The old names (" + [...old].join(", ") + ") are removed from the pool entries.");
   const skipNow = skipMap();
-  const skipChanged = JSON.stringify(skipNow) !== JSON.stringify(Object.fromEntries(Object.entries(S.skip).filter(([, v]) => Array.isArray(v) && v.length).map(([k, v]) => [k, [...v].sort()])));
+  const skipChanged = canon(skipNow) !== canon(Object.fromEntries(Object.entries(S.skip).filter(([, v]) => Array.isArray(v) && v.length).map(([k, v]) => [k, [...v].sort()])));
   for (const p of S.pools) {
     if (p.deleted) continue;
     for (const ref of p.skip) if (!p.origSkip.has(ref)) {
@@ -950,9 +954,8 @@ function plan() {
   }
   if (skipChanged && !changes.length) changes.push({ t: "mod", text: "~ left-out sources", where: "" });
   const cacheNow = cacheMap();
-  const cacheBefore = JSON.stringify(Object.fromEntries(Object.entries(S.cache).filter(([, v]) => v && typeof v === "object" && Object.keys(v).length)
-    .map(([k, v]) => [k, Object.fromEntries(Object.entries(v).sort((a, b) => byName(a[0], b[0])))])));
-  const cacheChanged = JSON.stringify(cacheNow) !== cacheBefore;
+  const cacheBefore = canon(Object.fromEntries(Object.entries(S.cache).filter(([, v]) => v && typeof v === "object" && Object.keys(v).length)));
+  const cacheChanged = canon(cacheNow) !== cacheBefore;
   for (const p of S.pools) {
     if (p.deleted) continue;
     for (const [ref, v] of p.cache) if (p.origCache.get(ref) !== v) {
