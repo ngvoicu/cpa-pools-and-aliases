@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.5 — 2026-11-06
+
+- Save no longer lists *cache levels* (or *left-out sources*) as changed when nothing changed. CPA returns the stored
+  maps in its own key order and the page compared them in pool order; the comparison now ignores key order.
+
 ## 1.3.4 — 2026-11-06
 
 - Cache suggestions for OpenRouter entries follow the model's documented lifetime (e.g. Claude 5 min) instead of
