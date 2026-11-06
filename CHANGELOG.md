@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0 — 2026-11-06
+
+- **Cache hit rates** per pool and member: the share of prompt tokens read from the cache in the last hour and the last
+  day, refreshed every minute, with requests, failures and tokens read and written in the tooltip. The plugin now
+  receives CPA's usage records (`usage_plugin`) and counts requests to pools in memory; the page reads them from
+  `GET /v0/management/cpa-pools-and-aliases/cache-stats` (management key). Anthropic-style and OpenAI-style token
+  counts are both read correctly.
+
 ## 1.3.5 — 2026-11-06
 
 - Save no longer lists *cache levels* (or *left-out sources*) as changed when nothing changed. CPA returns the stored

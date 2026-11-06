@@ -12,15 +12,20 @@
 //!    metadata of whichever member it registered last, so without this a pool's limits change with
 //!    registration order.
 //!
+//! 4. Measures each pool's prompt-cache hit rate: CPA hands every finished request to the plugin (usage.handle);
+//!    requests for a pool are counted per member, in memory, and served to the page at
+//!    /v0/management/cpa-pools-and-aliases/cache-stats (management key required).
+//!
 //! Pools come from the plugin's own config (plugins.configs.cpa-pools-and-aliases.pools), which
 //! CPA hands to the plugin on plugin.register / plugin.reconfigure.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_void, CStr};
 use std::os::raw::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Mutex, OnceLock, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
@@ -34,6 +39,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const REPO: &str = "https://github.com/ngvoicu/cpa-pools-and-aliases";
 const LOGO: &str = "https://raw.githubusercontent.com/ngvoicu/cpa-pools-and-aliases/main/assets/logo.svg";
 const PAGE_HTML: &str = include_str!("../web/index.html");
+/// Management API route for the hit rates (under /v0/management/, so it needs the management key).
+const STATS_PATH: &str = "/v0/management/cpa-pools-and-aliases/cache-stats";
 
 // ------------------------------------------------------------------ C ABI
 
@@ -222,16 +229,10 @@ fn handle(method: &str, request: &[u8]) -> Vec<u8> {
     match method {
         "plugin.register" | "plugin.reconfigure" => {
             apply_config(request);
-            ok_envelope(json!({
-                "schema_version": 1,
-                "metadata": {
-                    "Name": PLUGIN_NAME, "Version": VERSION, "Author": "ngvoicu",
-                    "GitHubRepository": REPO, "Logo": LOGO, "ConfigFields": []
-                },
-                "capabilities": { "management_api": true, "response_interceptor": true }
-            }))
+            ok_envelope(registration())
         }
         "management.register" => ok_envelope(json!({
+            "routes": [{ "Method": "GET", "Path": STATS_PATH }],
             "resources": [{
                 "Path": "/ui",
                 "Menu": PLUGIN_NAME,
@@ -239,7 +240,15 @@ fn handle(method: &str, request: &[u8]) -> Vec<u8> {
             }]
         })),
         "management.handle" => {
-            // Only one resource (/ui) is registered, so every call serves the page.
+            if management_path(request).is_some_and(|p| p.trim_end_matches('/') == STATS_PATH) {
+                let body = serde_json::to_vec(&stats_snapshot(now_secs())).unwrap_or_default();
+                return ok_envelope(json!({
+                    "StatusCode": 200,
+                    "Headers": { "content-type": ["application/json"], "cache-control": ["no-store"] },
+                    "Body": B64.encode(body)
+                }));
+            }
+            // Every other call is the page (/ui), the only resource.
             let prefix = r#"{"ok":true,"result":{"StatusCode":200,"Headers":{"content-type":["text/html; charset=utf-8"],"cache-control":["no-store"],"x-content-type-options":["nosniff"]},"Body":""#;
             let mut out = Vec::with_capacity(prefix.len() + page_b64().len() + 3);
             out.extend_from_slice(prefix.as_bytes());
@@ -247,10 +256,237 @@ fn handle(method: &str, request: &[u8]) -> Vec<u8> {
             out.extend_from_slice(br#""}}"#);
             out
         }
+        "usage.handle" => {
+            if let Ok(cfg) = settings().read() {
+                record_usage(request, now_secs(), &cfg.pools);
+            }
+            ok_envelope(json!({}))
+        }
         "response.intercept_after" => ok_envelope(intercept_response(request).unwrap_or_else(|| json!({}))),
         "plugin.quiesce" | "plugin.shutdown" => ok_envelope(json!({})),
         _ => error_envelope("unknown_method", &format!("{PLUGIN_ID}: unknown method {method}")),
     }
+}
+
+fn registration() -> Value {
+    json!({
+        "schema_version": 1,
+        "metadata": {
+            "Name": PLUGIN_NAME, "Version": VERSION, "Author": "ngvoicu",
+            "GitHubRepository": REPO, "Logo": LOGO, "ConfigFields": []
+        },
+        "capabilities": { "management_api": true, "response_interceptor": true, "usage_plugin": true }
+    })
+}
+
+fn management_path(request: &[u8]) -> Option<String> {
+    #[derive(Deserialize)]
+    #[allow(non_snake_case)]
+    struct Req {
+        #[serde(default)]
+        Path: String,
+    }
+    serde_json::from_slice::<Req>(request).ok().map(|r| r.Path)
+}
+
+// ------------------------------------------------------------------ cache hit rates
+
+/// Requests are counted in 5-minute slots, kept for a day.
+const SLOT_SECS: u64 = 300;
+const KEEP_SLOTS: u64 = 24 * 3600 / SLOT_SECS;
+
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+struct Counter {
+    requests: u64,
+    failed: u64,
+    /// prompt tokens, cached or not
+    prompt: u64,
+    cache_read: u64,
+    cache_write: u64,
+}
+
+impl Counter {
+    fn add(&mut self, o: &Counter) {
+        self.requests += o.requests;
+        self.failed += o.failed;
+        self.prompt += o.prompt;
+        self.cache_read += o.cache_read;
+        self.cache_write += o.cache_write;
+    }
+    fn json(&self) -> Value {
+        json!({ "requests": self.requests, "failed": self.failed, "prompt_tokens": self.prompt,
+                "cache_read_tokens": self.cache_read, "cache_write_tokens": self.cache_write })
+    }
+}
+
+#[derive(Default)]
+struct MemberStats {
+    auth_id: String,
+    provider: String,
+    model: String,
+    last_seen: u64,
+    slots: VecDeque<(u64, Counter)>,
+    total: Counter,
+}
+
+struct Stats {
+    since: u64,
+    /// lower-cased pool id -> member key (auth index, else auth id) -> counters
+    pools: HashMap<String, HashMap<String, MemberStats>>,
+}
+
+fn stats() -> &'static Mutex<Stats> {
+    static STATS: OnceLock<Mutex<Stats>> = OnceLock::new();
+    STATS.get_or_init(|| Mutex::new(Stats { since: now_secs(), pools: HashMap::new() }))
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// The fields of a usage record the plugin reads. Never the client key or the credential secret
+/// (APIKey, Source): they are not deserialized at all.
+#[derive(Deserialize, Default)]
+#[allow(non_snake_case)]
+struct UsageRecord {
+    #[serde(default)]
+    Alias: String,
+    #[serde(default)]
+    Model: String,
+    #[serde(default)]
+    Provider: String,
+    #[serde(default)]
+    ExecutorType: String,
+    #[serde(default)]
+    AuthID: String,
+    #[serde(default)]
+    AuthIndex: String,
+    #[serde(default)]
+    Failed: bool,
+    #[serde(default = "yes")]
+    Generate: bool,
+    #[serde(default)]
+    Detail: UsageDetail,
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[derive(Deserialize, Default, Clone, Copy)]
+#[allow(non_snake_case)]
+struct UsageDetail {
+    #[serde(default)]
+    InputTokens: i64,
+    #[serde(default)]
+    OutputTokens: i64,
+    #[serde(default)]
+    ReasoningTokens: i64,
+    #[serde(default)]
+    CachedTokens: i64,
+    #[serde(default)]
+    CacheReadTokens: i64,
+    #[serde(default)]
+    CacheCreationTokens: i64,
+    #[serde(default)]
+    TotalTokens: i64,
+}
+
+/// Returns (prompt tokens, cache read, cache write). Providers count input two ways: Anthropic's input
+/// excludes the cache (prompt = input + read + write), OpenAI-style input includes it (prompt = input).
+/// Known providers decide; otherwise the record's own numbers do (a reported total that adds the cache on top
+/// of the input, or a cache larger than the input, means it was excluded).
+fn prompt_tokens(d: &UsageDetail, provider: &str, executor: &str) -> (u64, u64, u64) {
+    let pos = |v: i64| v.max(0) as u64;
+    let (input, read, write) = (pos(d.InputTokens), pos(d.CacheReadTokens.max(d.CachedTokens)), pos(d.CacheCreationTokens));
+    let (output, reasoning, total) = (pos(d.OutputTokens), pos(d.ReasoningTokens), pos(d.TotalTokens));
+    let p = provider.to_lowercase();
+    let e = executor.to_lowercase();
+    let both = format!("{p} {e}");
+    let excluded = if e == "openaicompatexecutor" || p == "openai-compatibility" || p.starts_with("openai-compatible-") {
+        false
+    } else if both.contains("claude") || both.contains("anthropic") {
+        true
+    } else if ["gemini", "aistudio", "antigravity", "vertex", "openai", "codex", "xai", "grok"].iter().any(|m| both.contains(m)) {
+        false
+    } else {
+        let cache = read + write;
+        cache > input || (cache > 0 && total > 0 && (total == input + cache + output || total == input + cache + output + reasoning))
+    };
+    let prompt = if excluded { input + read + write } else { input.max(read + write) };
+    (prompt, read, write)
+}
+
+/// Adds one finished request to its pool member's counters (requests for anything but a pool are ignored).
+fn record_usage(request: &[u8], now: u64, pools: &HashMap<String, String>) {
+    let Ok(r) = serde_json::from_slice::<UsageRecord>(request) else { return };
+    if !r.Generate {
+        return; // token counting, not a model call
+    }
+    let pool = r.Alias.trim().to_lowercase();
+    if !pools.contains_key(&pool) {
+        return;
+    }
+    let key = if r.AuthIndex.trim().is_empty() { r.AuthID.trim().to_string() } else { r.AuthIndex.trim().to_string() };
+    if key.is_empty() {
+        return;
+    }
+    let mut c = Counter { requests: 1, ..Counter::default() };
+    if r.Failed {
+        c.failed = 1;
+    } else {
+        let (prompt, read, write) = prompt_tokens(&r.Detail, &r.Provider, &r.ExecutorType);
+        c.prompt = prompt;
+        c.cache_read = read;
+        c.cache_write = write;
+    }
+    let Ok(mut st) = stats().lock() else { return };
+    let m = st.pools.entry(pool).or_default().entry(key).or_default();
+    m.auth_id = r.AuthID.trim().to_string();
+    m.provider = r.Provider.trim().to_string();
+    m.model = r.Model.trim().to_string();
+    m.last_seen = now;
+    m.total.add(&c);
+    let slot = now / SLOT_SECS;
+    match m.slots.back_mut() {
+        Some((s, counter)) if *s == slot => counter.add(&c),
+        _ => m.slots.push_back((slot, c)),
+    }
+    while m.slots.front().is_some_and(|(s, _)| *s + KEEP_SLOTS <= slot) {
+        m.slots.pop_front();
+    }
+}
+
+fn window(m: &MemberStats, now: u64, secs: u64) -> Counter {
+    let first = (now.saturating_sub(secs) / SLOT_SECS) + 1;
+    let mut c = Counter::default();
+    for (s, counter) in &m.slots {
+        if *s >= first {
+            c.add(counter);
+        }
+    }
+    c
+}
+
+/// Counters per pool and member for the last hour, the last day and since the plugin started.
+fn stats_snapshot(now: u64) -> Value {
+    let Ok(st) = stats().lock() else { return json!({}) };
+    let mut pools = Map::new();
+    for (pool, members) in &st.pools {
+        let mut list: Vec<Value> = members
+            .iter()
+            .map(|(key, m)| {
+                json!({
+                    "auth_index": key, "auth_id": m.auth_id, "provider": m.provider, "model": m.model,
+                    "last_seen": m.last_seen,
+                    "hour": window(m, now, 3600).json(), "day": window(m, now, 24 * 3600).json(), "all": m.total.json(),
+                })
+            })
+            .collect();
+        list.sort_by(|a, b| a["auth_index"].as_str().cmp(&b["auth_index"].as_str()));
+        pools.insert(pool.clone(), json!({ "members": list }));
+    }
+    json!({ "since": st.since, "now": now, "slot_seconds": SLOT_SECS, "pools": pools })
 }
 
 // ------------------------------------------------------------------ model lists
@@ -461,6 +697,78 @@ mod tests {
         let mut openai = json!({"data":[{"id":"gpt-6.1-sol","object":"model"}]});
         assert!(!clean_model_list(&mut openai, &t));
         assert_eq!(openai["data"][0], json!({"id":"gpt-6.1-sol","object":"model"}));
+    }
+
+    fn detail(input: i64, read: i64, write: i64, output: i64, total: i64) -> UsageDetail {
+        UsageDetail { InputTokens: input, OutputTokens: output, CachedTokens: read, CacheReadTokens: read, CacheCreationTokens: write, TotalTokens: total, ..UsageDetail::default() }
+    }
+
+    #[test]
+    fn counts_prompt_tokens_both_ways() {
+        // Anthropic: input excludes the cache (values as CPA records them for a Claude key)
+        assert_eq!(prompt_tokens(&detail(100, 3000, 900, 20, 4020), "claude", "ClaudeExecutor"), (4000, 3000, 900));
+        // OpenAI-compatible (also OpenRouter Claude) and Codex: input includes it
+        assert_eq!(prompt_tokens(&detail(5000, 4000, 0, 20, 5020), "openai-compatible-openrouter", "OpenAICompatExecutor"), (5000, 4000, 0));
+        assert_eq!(prompt_tokens(&detail(5000, 4000, 0, 20, 5020), "codex", "CodexExecutor"), (5000, 4000, 0));
+        // unknown providers: the record's own numbers decide
+        assert_eq!(prompt_tokens(&detail(100, 3000, 900, 20, 4020), "devin", "DevinExecutor"), (4000, 3000, 900));
+        assert_eq!(prompt_tokens(&detail(5000, 1000, 0, 20, 5020), "devin", "DevinExecutor"), (5000, 1000, 0));
+        assert_eq!(prompt_tokens(&detail(10, 3000, 0, 20, 0), "devin", ""), (3010, 3000, 0));
+        assert_eq!(prompt_tokens(&detail(-1, 0, 0, 0, 0), "", ""), (0, 0, 0));
+    }
+
+    fn usage(pool: &str, index: &str, provider: &str, d: UsageDetail, failed: bool, generate: bool) -> Vec<u8> {
+        json!({"Alias": pool, "Model": "m", "Provider": provider, "ExecutorType": "", "AuthID": format!("id-{index}"),
+               "AuthIndex": index, "Failed": failed, "Generate": generate, "Source": "sk-secret", "APIKey": "sk-client",
+               "Detail": {"InputTokens": d.InputTokens, "OutputTokens": d.OutputTokens, "CachedTokens": d.CachedTokens,
+                          "CacheReadTokens": d.CacheReadTokens, "CacheCreationTokens": d.CacheCreationTokens, "TotalTokens": d.TotalTokens}})
+        .to_string()
+        .into_bytes()
+    }
+
+    #[test]
+    fn records_pool_requests_per_member_and_window() {
+        let pools: HashMap<String, String> = [("hits/zeus".to_string(), "hits/Zeus".to_string())].into();
+        let t0 = 1_800_000_000;
+        let claude = detail(100, 3000, 900, 20, 4020);
+        // two hours ago: counts for the day, not the hour
+        record_usage(&usage("hits/Zeus", "a1", "claude", claude, false, true), t0 - 7200, &pools);
+        record_usage(&usage("hits/zeus", "a1", "claude", detail(100, 3900, 0, 20, 4020), false, true), t0 - 60, &pools);
+        record_usage(&usage("hits/zeus", "b2", "openai-compatible-x", detail(5000, 0, 0, 20, 5020), false, true), t0 - 30, &pools);
+        record_usage(&usage("hits/zeus", "b2", "openai-compatible-x", detail(0, 0, 0, 0, 0), true, true), t0, &pools);
+        record_usage(&usage("not-a-pool", "a1", "claude", claude, false, true), t0, &pools);
+        record_usage(&usage("hits/zeus", "a1", "claude", claude, false, false), t0, &pools); // token count only
+
+        let snap = stats_snapshot(t0);
+        assert!(snap["pools"].get("not-a-pool").is_none());
+        let members = snap["pools"]["hits/zeus"]["members"].as_array().unwrap();
+        assert_eq!(members.len(), 2);
+        let a = &members[0];
+        assert_eq!(a["auth_index"], "a1");
+        assert_eq!(a["hour"], json!({"requests":1,"failed":0,"prompt_tokens":4000,"cache_read_tokens":3900,"cache_write_tokens":0}));
+        assert_eq!((a["day"]["requests"].as_u64(), a["day"]["prompt_tokens"].as_u64()), (Some(2), Some(8000)));
+        assert_eq!(a["all"]["cache_read_tokens"], 6900);
+        let b = &members[1];
+        assert_eq!(b["hour"], json!({"requests":2,"failed":1,"prompt_tokens":5000,"cache_read_tokens":0,"cache_write_tokens":0}));
+        assert!(!snap.to_string().contains("sk-"), "never keeps keys");
+        // two days later the slots are gone; the totals stay
+        let later = stats_snapshot(t0 + 2 * 24 * 3600);
+        let a = &later["pools"]["hits/zeus"]["members"][0];
+        assert_eq!((a["day"]["requests"].as_u64(), a["all"]["requests"].as_u64()), (Some(0), Some(2)));
+    }
+
+    #[test]
+    fn serves_stats_on_its_route_and_the_page_elsewhere() {
+        let reg: Value = serde_json::from_slice(&handle("management.register", b"{}")).unwrap();
+        assert_eq!(reg["result"]["routes"][0]["Path"], STATS_PATH);
+        assert_eq!(registration()["capabilities"]["usage_plugin"], true);
+        let req = json!({"Method":"GET","Path": STATS_PATH}).to_string();
+        let out: Value = serde_json::from_slice(&handle("management.handle", req.as_bytes())).unwrap();
+        let body: Value = serde_json::from_slice(&B64.decode(out["result"]["Body"].as_str().unwrap()).unwrap()).unwrap();
+        assert!(body["since"].as_u64().is_some() && body["pools"].is_object());
+        let req = json!({"Method":"GET","Path":"/v0/resource/plugins/cpa-pools-and-aliases/ui"}).to_string();
+        let out: Value = serde_json::from_slice(&handle("management.handle", req.as_bytes())).unwrap();
+        assert_eq!(out["result"]["Headers"]["content-type"][0], "text/html; charset=utf-8");
     }
 
     #[test]
