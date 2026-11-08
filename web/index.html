@@ -74,8 +74,12 @@ input:focus, select:focus { border-color: var(--accent); }
 .member { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center;
   border: 1px solid var(--border); background: var(--panel2); border-radius: 8px; padding: 7px 8px 7px 10px; }
 .member.new { border-color: rgba(245,165,36,.6); }
-.member .src { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.member .model { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Member lines wrap: the model name and account shorten with an ellipsis, while the badges, limits, hits and the
+   cache level control move to the next line instead of being cut off on narrow cards. */
+.member .src, .member .model { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 2px; min-width: 0; }
+.member .src { font-size: 12px; color: var(--muted); }
+.member .model { font-family: var(--mono); font-size: 12.5px; }
+.member .name { min-width: 0; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .empty-members { border: 1px dashed var(--border2); border-radius: 8px; padding: 12px; text-align: center; color: var(--faint); font-size: 12px; }
 .removed { margin-top: 6px; font-size: 12px; color: var(--danger); font-family: var(--mono); }
 .add-row { margin-top: 10px; }
@@ -102,7 +106,7 @@ input:focus, select:focus { border-color: var(--accent); }
 .member .lim.unknown { color: var(--danger); }
 .pool-hits { margin: 4px 0 0 6px; font-size: 12px; color: var(--muted); }
 .pool-hits:empty, .member .hits:empty { display: none; }
-.member .hits { white-space: nowrap; color: var(--muted); font: 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; margin-left: 8px; }
+.member .hits { white-space: nowrap; color: var(--muted); font: 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
 .pool-hits.low, .member .hits.low { color: var(--warn); }
 .member .lim.ext { text-decoration: underline dotted; text-underline-offset: 3px; }
 .member .cache-sug { grid-column: 2 / 4; font-size: 12px; color: var(--warn); display: flex; align-items: center; gap: 8px; }
@@ -113,7 +117,7 @@ input:focus, select:focus { border-color: var(--accent); }
 .pool-prefix.changed { outline: 2px solid var(--warn); outline-offset: -1px; color: inherit; }
 .pool-cache .lowl { color: var(--warn); }
 .member.lowlimit { border-color: rgba(245,165,36,.55); }
-.member .lim { white-space: nowrap; color: var(--muted); font: 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; margin-left: 6px; }
+.member .lim { white-space: nowrap; color: var(--muted); font: 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
 .member .limit-warn { grid-column: 2 / 4; font-size: 12px; color: var(--warn); display: flex; align-items: center; gap: 8px; }
 
 .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); display: flex; flex-direction: column; overflow: hidden; }
@@ -1179,9 +1183,9 @@ function poolCard(p) {
     const c = cacheOf(p, s);
     const leaveOut = () => { p.members.delete(sid); p.auto.delete(sid); p.skip.add(s.ref); render(); };
     const cacheEl = c && c.known
-      ? h("span", { class: "cache", title: c.why }, ` · cache ${cacheLabel(c.level)}`)
+      ? h("span", { class: "cache", title: c.why }, `cache ${cacheLabel(c.level)}`)
       : h("span", { class: "cache" + (c ? "" : " unset"), title: c ? "How long this member keeps the prompt cache for this model (from your measurements). Used for the pool summary, warnings and the lifetime reported to clients." : "Cache level not set: the pool reports no cache lifetime to clients until every member has one. Set it from your measurements, or no cache." },
-          " · cache",
+          "cache",
           h("select", { class: c ? "" : "unset", disabled: p.deleted, onclick: (ev) => ev.stopPropagation(), onchange: (ev) => {
             if (ev.target.value) p.cache.set(s.ref, ev.target.value); else p.cache.delete(s.ref);
             render();
@@ -1203,9 +1207,9 @@ function poolCard(p) {
     list.append(h("div", { class: "member" + (isNew ? " new" : "") + (nocache ? " nocache" : lowWhy ? " lowlimit" : ""), title: srcLabel(s) },
       h("i", { class: "dot", style: `background:${prov(s.provider).color}` }),
       h("div", { style: "min-width:0" },
-        h("div", { class: "model" }, model, " ", direct ? h("span", { class: "badge direct" }, "direct") : null, limEl,
+        h("div", { class: "model" }, h("span", { class: "name", title: model }, model), direct ? h("span", { class: "badge direct" }, "direct") : null, limEl,
           h("span", { class: "hits", "data-pool": lc(p.name), "data-sid": sid })),
-        h("div", { class: "src" }, srcLabel(s), s.disabled ? " (disabled)" : "", cacheEl)),
+        h("div", { class: "src" }, h("span", { class: "name", title: srcLabel(s) }, srcLabel(s) + (s.disabled ? " (disabled)" : "")), cacheEl)),
       h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut,
         title: direct ? `Remove from pool. ${s.label} serves ${p.name} under that exact name, so saving makes it stop: an API key drops it from its model list; an account keeps it only through extra-pool aliases, or gets it excluded.` : "Remove from pool" }, "✕"),
       sugEl,
@@ -1217,8 +1221,6 @@ function poolCard(p) {
   card.append(list);
   const removed = p.origName === p.name ? [...p.origMembers.keys()].filter((sid) => !mem.has(sid)).map(srcById).filter(Boolean) : [];
   if (removed.length && !p.deleted) card.append(h("div", { class: "removed" }, "removed: " + removed.map((s) => s.label).join(", ")));
-  const left = [...p.skip].map((ref) => S.sources.find((x) => x.ref === ref)).filter((x) => x && !mem.has(x.id) && !removed.includes(x));
-  if (left.length && !p.deleted) card.append(h("div", { class: "hint", style: "margin-top:6px" }, "left out: " + left.map((x) => x.label).join(", ")));
 
   if (!p.deleted && !p.error) {
     const key = mkey(p.name);
