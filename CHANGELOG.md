@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.1 — 2026-11-08
+
+- **Member lines wrap instead of being cut off.** On narrow cards the account line ended in "…", hiding the cache
+  level control (and sometimes the limits and hit rate). The model name and the account still shorten with "…", but
+  the badges, limits, hits and the cache control move to the next line.
+- **No "left out" line under pools.** Sources you left out of a pool are no longer listed; add one back with
+  "+ Add account or key…".
+
 ## 1.4.0 — 2026-11-08
 
 - **Cache hit rates** per pool and member: the share of prompt tokens read from the cache in the last hour and the last
