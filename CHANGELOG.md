@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0 — 2026-11-06
+## 1.4.0 — 2026-11-08
 
 - **Cache hit rates** per pool and member: the share of prompt tokens read from the cache in the last hour and the last
   day, refreshed every minute, with requests, failures and tokens read and written in the tooltip. The plugin now
