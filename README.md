@@ -71,6 +71,8 @@ The full story, with screenshots: **[Pools for CLIProxyAPI](https://ngvoicu.dev/
   lower limits than the rest are flagged and can be left out with one click.
 - **Consistent limits for clients.** Model lists report each pool's smallest limits, and its cache lifetime when every
   member caches, so clients such as pi size and warm conversations correctly whichever member CPA registered last.
+- **Cache hit rates.** Each pool and member shows how much of the prompt was read from the cache, for the last hour and
+  the last day, from CPA's own records of the requests it served. A member with a low rate is highlighted.
 - **Review before save.** Every save lists the exact changes, account by account.
 - **Nothing in the request path.** Pools are saved as CPA's own aliases. Remove the plugin and your pools keep working.
 
@@ -161,6 +163,20 @@ background and keeps a compact extract in the browser for a day.
   its catalog value, so a pool of Claude logins (1 hour) isn't refreshed every few minutes.
 
 No request changes: the limits are what clients are told.
+
+### Cache hit rates
+
+CPA hands every finished request to the plugin with its token counts. For requests to a pool the plugin adds up, per
+member, the prompt tokens and how many of them were read from the cache, in 5-minute slots kept for a day. The page
+shows the **last hour** (or the last day when the last hour had none) on every member and both on the pool, and
+refreshes them every minute. The tooltip has the requests, failures and tokens read and written.
+
+- Providers count input two ways (Anthropic's excludes the cached part, OpenAI's includes it); the plugin reads each
+  the right way, so rates compare across members.
+- The first message of every conversation is a miss, so even a perfect cache stays below 100%. A low rate on a busy
+  member means its cache expires between messages (check its cache level, or warm it from the client).
+- Counts live in memory: they start again when CPA or the plugin restarts. They are served at
+  `GET /v0/management/cpa-pools-and-aliases/cache-stats` (management key), never with any key or prompt.
 
 ### Good to know
 

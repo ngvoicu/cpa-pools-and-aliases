@@ -100,6 +100,10 @@ input:focus, select:focus { border-color: var(--accent); }
 .pool-cache .unk { color: var(--danger); }
 .pool-cache .mixed { color: var(--warn); }
 .member .lim.unknown { color: var(--danger); }
+.pool-hits { margin: 4px 0 0 6px; font-size: 12px; color: var(--muted); }
+.pool-hits:empty, .member .hits:empty { display: none; }
+.member .hits { white-space: nowrap; color: var(--muted); font: 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; margin-left: 8px; }
+.pool-hits.low, .member .hits.low { color: var(--warn); }
 .member .lim.ext { text-decoration: underline dotted; text-underline-offset: 3px; }
 .member .cache-sug { grid-column: 2 / 4; font-size: 12px; color: var(--warn); display: flex; align-items: center; gap: 8px; }
 .member .cache select.unset { color: var(--danger); border-color: rgba(240,91,91,.6); }
@@ -387,7 +391,7 @@ async function load() {
     if (typeof json === "string") { try { json = JSON.parse(json); } catch (_) { json = null; } }
     const p = lc(f.provider || f.type);
     sources.push({
-      id: "auth:" + f.name, ref: "auth:" + f.name, kind: "auth", provider: p, file: f.name,
+      id: "auth:" + f.name, ref: "auth:" + f.name, kind: "auth", provider: p, file: f.name, indexes: [f.auth_index].filter(Boolean),
       label: f.email || f.label || f.account || f.name.replace(/\.json$/i, ""),
       disabled: !!f.disabled,
       entries: clone((json && (json.model_aliases || json["model-aliases"])) || []),
@@ -410,12 +414,14 @@ async function load() {
       const keyLevel = keys.map((k, ki) => ({ k, ki })).filter(({ k }) => hasKey(k) && Array.isArray(k.models));
       if (Array.isArray(g.models) || keyLevel.length === 0) {
         sources.push({ id: `apikey:${p0}:${gi}`, ref: `key:${p0}/${name}`, kind: "apikey", provider: p, providerKey: p0, gi, ki: null,
+          indexes: [g.auth_index, ...keys.map((k) => k && k.auth_index)].filter(Boolean),
           label: name, entries: clone(g.models || []), hadList: Array.isArray(g.models) && g.models.length > 0, baseUrl: g["base-url"] || "",
           excluded: clone(g["excluded-models"] || []),
           profile: g["fingerprint-profile"] || (keys.find(hasKey) || {})["fingerprint-profile"] || "" });
       }
       for (const { k, ki } of keyLevel) {
         sources.push({ id: `apikey:${p0}:${gi}:${ki}`, ref: `key:${p0}/${name}#${ki + 1}`, kind: "apikey", provider: p, providerKey: p0, gi, ki,
+          indexes: [k.auth_index].filter(Boolean),
           label: name + (keys.length > 1 ? ` · key ${ki + 1}` : ""), entries: clone(k.models || []), hadList: k.models.length > 0, baseUrl: k["base-url"] || g["base-url"] || "",
           excluded: clone(Array.isArray(k["excluded-models"]) ? k["excluded-models"] : (g["excluded-models"] || [])),
           profile: k["fingerprint-profile"] || g["fingerprint-profile"] || "" });
@@ -440,6 +446,7 @@ async function load() {
   if (joined) toast(`${joined} new source${joined === 1 ? "" : "s"} joined your pools. Review and save to apply.`);
   show("loading", false); show("app", true);
   render();
+  refreshHits();
   loadPublicCatalogs().then((ext) => { if (ext && S) { S.ext = ext; render(); } });
 }
 
@@ -603,6 +610,77 @@ function cacheSummary(p, mem) {
     `${unknown.length} cache level${unknown.length === 1 ? "" : "s"} not set`));
   return h("div", { class: "pool-cache" }, ...parts);
 }
+// Cache hit rates. CPA hands every finished request to the plugin, which counts, per pool and member, the prompt
+// tokens and how many of them were read from the cache (in memory, since CPA or the plugin last started). The page
+// shows the last hour (else the last day) and refreshes every minute without redrawing anything else.
+const HITS_PATH = "/v0/management/" + PLUGIN_ID + "/cache-stats";
+const HITS_LOW = 0.5;
+let hitsTimer = null;
+async function refreshHits() {
+  clearTimeout(hitsTimer);
+  try {
+    const res = await fetch(conn.base + HITS_PATH, { headers: { Authorization: "Bearer " + conn.key }, cache: "no-store" });
+    if (S) S.hits = res.ok ? await res.json() : null; // older plugin or CPA without usage records: show nothing
+  } catch (_) { if (S) S.hits = null; }
+  fillHits();
+  hitsTimer = setTimeout(refreshHits, 60_000);
+}
+const addCounts = (a, b) => ({ requests: a.requests + (b.requests || 0), failed: a.failed + (b.failed || 0),
+  prompt: a.prompt + (b.prompt_tokens || 0), read: a.read + (b.cache_read_tokens || 0), write: a.write + (b.cache_write_tokens || 0) });
+const noCounts = () => ({ requests: 0, failed: 0, prompt: 0, read: 0, write: 0 });
+// The counts of a pool's members (by source id) for the last hour and day. Requests on sources no longer in the
+// pool are left out of the member rows but kept in the pool's total.
+function poolHits(poolKey) {
+  const entry = S && S.hits && S.hits.pools && S.hits.pools[poolKey];
+  if (!entry) return null;
+  const bySid = new Map(), total = { hour: noCounts(), day: noCounts() };
+  for (const m of entry.members || []) {
+    const src = S.sources.find((x) => (x.indexes || []).includes(m.auth_index)) ||
+      S.sources.find((x) => x.kind === "auth" && x.file === m.auth_id);
+    const cur = (src && bySid.get(src.id)) || { hour: noCounts(), day: noCounts() };
+    for (const w of ["hour", "day"]) { cur[w] = addCounts(cur[w], m[w] || {}); total[w] = addCounts(total[w], m[w] || {}); }
+    if (src) bySid.set(src.id, cur);
+  }
+  return { bySid, total };
+}
+const pct = (c) => (c.prompt ? Math.round((100 * c.read) / c.prompt) : null);
+function hitText(c) {
+  const p = pct(c);
+  return `${p === null ? "–" : p + "%"} (${c.requests} request${c.requests === 1 ? "" : "s"})`;
+}
+function hitTitle(c, when) {
+  return `${when}: ${c.requests} request${c.requests === 1 ? "" : "s"}${c.failed ? `, ${c.failed} failed` : ""}. ` +
+    `${fmtTok(c.read)} of ${fmtTok(c.prompt)} prompt tokens read from the cache, ${fmtTok(c.write)} written to it. ` +
+    "The first message of a conversation always misses; a low rate on a busy member means its cache expires between messages.";
+}
+// One window for a row: the last hour when it had requests, else the last day.
+const pick = (x) => (x.hour.requests ? [x.hour, "Last hour", "1 h"] : [x.day, "Last 24 hours (none in the last hour)", "24 h"]);
+function fillHits() {
+  const since = S && S.hits ? new Date(S.hits.since * 1000).toLocaleString() : "";
+  for (const el of document.querySelectorAll(".pool-hits[data-pool]")) {
+    const ph = poolHits(el.dataset.pool);
+    el.replaceChildren(); el.className = "pool-hits"; el.title = "";
+    if (!S || !S.hits) continue;
+    if (!ph || !ph.total.day.requests) { el.textContent = `cache hits: no requests since ${since}`; continue; }
+    const [c, when] = pick(ph.total);
+    const low = pct(c) !== null && pct(c) < HITS_LOW * 100;
+    el.textContent = "cache hits: " + (ph.total.hour.requests ? `last hour ${hitText(ph.total.hour)} · ` : "") + `last 24 h ${hitText(ph.total.day)}`;
+    el.classList.toggle("low", low);
+    el.title = hitTitle(c, when) + ` Counted since ${since}.`;
+  }
+  for (const el of document.querySelectorAll(".member .hits[data-pool]")) {
+    const ph = poolHits(el.dataset.pool);
+    const x = ph && ph.bySid.get(el.dataset.sid);
+    el.textContent = ""; el.title = ""; el.className = "hits";
+    if (!x || !x.day.requests) continue;
+    const [c, when, short] = pick(x);
+    const p = pct(c);
+    el.textContent = `hits ${p === null ? "–" : p + "%"}` + (x.hour.requests ? "" : ` · ${short}`);
+    el.classList.toggle("low", p !== null && p < HITS_LOW * 100);
+    el.title = hitTitle(c, when);
+  }
+}
+
 // Limits. A member's context window and output limit come from CPA's model catalog for its provider;
 // max-context-length on a key's model in the config overrides the window. CPA tells clients one member's
 // limits per pool (whichever it registered last), so when members differ, a long conversation can fail or
@@ -1000,6 +1078,7 @@ function render() {
   renderSee();
   renderPools();
   renderSources();
+  fillHits();
   const { changes, errors } = plan();
   $("pendingCount").textContent = changes.length + " change" + (changes.length === 1 ? "" : "s");
   show("pending", changes.length > 0);
@@ -1088,6 +1167,7 @@ function poolCard(p) {
     const cs = cacheSummary(p, mem); if (cs) card.append(cs);
     const ls = limitSummary(st, mem); if (ls) card.append(ls);
   }
+  if (!p.deleted) card.append(h("div", { class: "pool-hits", "data-pool": lc(p.name) }));
 
   const list = h("div", { class: "members" });
   if (!mem.size) list.append(h("div", { class: "empty-members" }, "No account or key serves this model yet. Drop one here or add it below."));
@@ -1123,7 +1203,8 @@ function poolCard(p) {
     list.append(h("div", { class: "member" + (isNew ? " new" : "") + (nocache ? " nocache" : lowWhy ? " lowlimit" : ""), title: srcLabel(s) },
       h("i", { class: "dot", style: `background:${prov(s.provider).color}` }),
       h("div", { style: "min-width:0" },
-        h("div", { class: "model" }, model, " ", direct ? h("span", { class: "badge direct" }, "direct") : null, limEl),
+        h("div", { class: "model" }, model, " ", direct ? h("span", { class: "badge direct" }, "direct") : null, limEl,
+          h("span", { class: "hits", "data-pool": lc(p.name), "data-sid": sid })),
         h("div", { class: "src" }, srcLabel(s), s.disabled ? " (disabled)" : "", cacheEl)),
       h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut,
         title: direct ? `Remove from pool. ${s.label} serves ${p.name} under that exact name, so saving makes it stop: an API key drops it from its model list; an account keeps it only through extra-pool aliases, or gets it excluded.` : "Remove from pool" }, "✕"),
