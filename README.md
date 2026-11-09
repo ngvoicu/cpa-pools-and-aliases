@@ -128,8 +128,11 @@ so it gets that member's cache; a conversation that moves to another member star
 - **Claude members are known:** logins get a 1-hour cache from CPA, API keys Anthropic's 5-minute default (1 hour on
   keys with the `claude-code-cli` fingerprint profile).
 - **Every other member** (Devin, Codex, OpenAI-compatible keys, ...) depends on the provider and the model, so you set it
-  per pool member: *no cache*, *5 min*, *30 min*, *1 hour* or *longer*, for example from
-  [cache-ttl-probe](https://github.com/ngvoicu/cache-ttl-probe) measurements.
+  per pool member: *no cache*, *5 min*, *30 min*, *1 hour* or *2 hours*, for example from
+  [cache-ttl-probe](https://github.com/ngvoicu/cache-ttl-probe) measurements. *2 hours* fits routes whose cache is
+  measured to last hours (e.g. GPT-6.1 Sol on a ChatGPT/Codex login); nothing longer is offered, because past ~2 hours
+  the cache is a coin flip on every route measured. The *longer* level of earlier versions is read as *1 hour* (what
+  clients were already told) and saved that way on the next save.
 - The pool summary shows the shortest and longest level. Mixed pools work; clients that refresh caches (pi) just have
   to plan for the shortest.
 - **No cache** marks a member whose conversations pay the full price on every message (for example Claude through an
@@ -163,7 +166,7 @@ background and keeps a compact extract in the browser for a day.
   OpenRouter's list and models.dev in the background), stored limits that no longer match are saved on their own and a
   note lists what changed (e.g. `gpt-6-sol output 64k → 128k`). If anything else is pending, they wait for *Save*.
 - **Cache lifetime:** when every member's cache level is known and none is *no cache*, Codex-style lists also carry
-  `prompt_cache_ttl_seconds` (the shortest level; *longer* counts as 1 hour). pi's CPA extension uses it instead of
+  `prompt_cache_ttl_seconds` (the shortest level). pi's CPA extension uses it instead of
   its catalog value, so a pool of Claude logins (1 hour) isn't refreshed every few minutes.
 
 No request changes: the limits are what clients are told.

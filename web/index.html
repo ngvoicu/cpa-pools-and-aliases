@@ -551,10 +551,11 @@ function readPool(r) {
   }
   const sk = Array.isArray(S.skip[name]) ? S.skip[name].filter((x) => typeof x === "string") : [];
   const raw = S.cache[name] && typeof S.cache[name] === "object" ? S.cache[name] : {};
-  const cache = new Map(Object.entries(raw).filter(([, v]) => CACHE_RANK[v] !== undefined));
+  const stored = Object.entries(raw).filter(([, v]) => CACHE_RANK[v] !== undefined || LEGACY_LEVEL[v]);
+  const cache = new Map(stored.map(([ref, v]) => [ref, LEGACY_LEVEL[v] || v]));
   return { id: "p" + (S.nextId++), name, origName: name, oldLabel: r.label && r.label !== name ? r.label : "",
     members, origMembers: new Map(members), deleted: false, isNew: false, error: null,
-    skip: new Set(sk), origSkip: new Set(sk), auto: new Set(), cache, origCache: new Map(cache) };
+    skip: new Set(sk), origSkip: new Set(sk), auto: new Set(), cache, origCache: new Map(stored) };
 }
 
 // Pools from v0.3 and earlier have free names ("zeus"). Rename them to their model id. Pools that mix models or have no members can't be converted automatically.
@@ -596,8 +597,11 @@ function autoJoin(p) {
 // its own level; a conversation stays on one member (session affinity) and gets that member's cache.
 // Claude levels are CPA's own fixed behaviour; for every other provider the user sets the level per
 // pool member (plugins.configs.<id>.cache: pool -> source ref -> level).
-const CACHE_LEVELS = [["none", "no cache"], ["5m", "5 min"], ["30m", "30 min"], ["1h", "1 hour"], ["long", "longer"]];
-const CACHE_RANK = { none: 0, "5m": 1, "30m": 2, "1h": 3, long: 4 };
+const CACHE_LEVELS = [["none", "no cache"], ["5m", "5 min"], ["30m", "30 min"], ["1h", "1 hour"], ["2h", "2 hours"]];
+const CACHE_RANK = { none: 0, "5m": 1, "30m": 2, "1h": 3, "2h": 4 };
+// Before 1.5.0 there was a "longer" level (stored as "long"), reported to clients as 1 hour. It's read as 1 hour, so
+// nothing changes for clients, and saved as "1h" on the next save.
+const LEGACY_LEVEL = { long: "1h" };
 const cacheLabel = (v) => (CACHE_LEVELS.find(([k]) => k === v) || [v, v])[1];
 function knownCache(s) {
   if (!s || s.provider !== "claude") return null;
@@ -815,7 +819,7 @@ function cacheSuggestion(s, model) {
     return { level: "none", why: "This model only caches when the request asks for it, and CPA's OpenAI-compatible connection doesn't ask (except for OpenRouter entries), so it doesn't cache here." };
   }
   if (!ttl) return null;
-  const level = ttl > 3600 ? "long" : ttl >= 3600 ? "1h" : ttl >= 1800 ? "30m" : "5m";
+  const level = ttl >= 7200 ? "2h" : ttl >= 3600 ? "1h" : ttl >= 1800 ? "30m" : "5m";
   return { level, why: `models.dev lists a ${cacheLabel(level)} cache for this model at its provider. Routes through CPA can differ; your measurements win.` };
 }
 
@@ -868,7 +872,7 @@ function limitSummary(st, mem) {
 // What clients are told about each pool: the smallest known context window and output limit, and the cache
 // lifetime when every member's level is known and caches (the shortest wins). Stored in plugins.configs.<id>.limits;
 // the plugin writes it into model lists, so it no longer depends on which member CPA registered last.
-const CACHE_SECONDS = { "5m": 300, "30m": 1800, "1h": 3600, long: 3600 };
+const CACHE_SECONDS = { "5m": 300, "30m": 1800, "1h": 3600, "2h": 7200 };
 function poolCacheTtl(p, mem) {
   let ttl = 0;
   for (const sid of mem.keys()) {
@@ -1079,7 +1083,9 @@ function plan() {
     if (p.deleted) continue;
     for (const [ref, v] of p.cache) if (p.origCache.get(ref) !== v) {
       const src = S.sources.find((x) => x.ref === ref);
-      if (src) changes.push({ t: "mod", text: `~ ${p.name}: cache ${cacheLabel(v)}`, where: srcLabel(src) });
+      const was = p.origCache.get(ref);
+      const why = LEGACY_LEVEL[was] === v ? ` (was "longer", already reported as ${cacheLabel(v)})` : "";
+      if (src) changes.push({ t: "mod", text: `~ ${p.name}: cache ${cacheLabel(v)}${why}`, where: srcLabel(src) });
     }
     for (const [ref] of p.origCache) if (!p.cache.has(ref)) {
       const src = S.sources.find((x) => x.ref === ref);

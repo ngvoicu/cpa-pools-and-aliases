@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0 — 2026-11-09
+
+- **New cache level: 2 hours.** For routes whose cache is measured to last hours, such as GPT-6.1 Sol on a
+  ChatGPT/Codex login (warm at 1, 2 and 3 hours in our measurements). Clients are told 7,200 seconds, so pi stops
+  warming or compacting a cache that is still alive after an hour.
+- **The *longer* level is gone.** It promised more than it said: clients were told 1 hour whatever the route did. Members
+  set to *longer* are read as *1 hour* (no change for clients); the review lists them, and the next save stores `1h`.
+- **models.dev suggestions:** a documented lifetime of 2 hours or more suggests *2 hours* (was *longer*).
+
 ## 1.4.2 — 2026-11-09
 
 - **Stored limits follow the catalogs.** The limits reported to clients were saved once and then stayed, so after a
