@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.2 — 2026-11-09
+
+- **Stored limits follow the catalogs.** The limits reported to clients were saved once and then stayed, so after a
+  catalog change (e.g. CPA's Devin list going from 64k to the real output limits) model lists kept the old numbers
+  until someone saved the page. Now, when the page opens and every source of limits has loaded, out-of-date stored
+  limits are saved on their own and a note lists what changed. With other changes pending they wait for *Save*.
+
 ## 1.4.1 — 2026-11-08
 
 - **Member lines wrap instead of being cut off.** On narrow cards the account line ended in "…", hiding the cache

@@ -71,6 +71,7 @@ The full story, with screenshots: **[Pools for CLIProxyAPI](https://ngvoicu.dev/
   lower limits than the rest are flagged and can be left out with one click.
 - **Consistent limits for clients.** Model lists report each pool's smallest limits, and its cache lifetime when every
   member caches, so clients such as pi size and warm conversations correctly whichever member CPA registered last.
+  When a catalog changes, opening the page updates the stored limits on its own.
 - **Cache hit rates.** Each pool and member shows how much of the prompt was read from the cache, for the last hour and
   the last day, from CPA's own records of the requests it served. A member with a low rate is highlighted.
 - **Review before save.** Every save lists the exact changes, account by account.
@@ -158,6 +159,9 @@ background and keeps a compact extract in the browser for a day.
   pool's smallest limits, and the plugin writes them into every model list (Codex-style `context_window`,
   `max_context_window`, `max_tokens`; Gemini `inputTokenLimit`, `outputTokenLimit`), so they no longer change with
   registration order. Members with lower limits are highlighted with *Leave out*, or move the others to an extra pool.
+- **Stored limits follow the catalogs.** When the page opens and has every source of limits (CPA's catalogs, then
+  OpenRouter's list and models.dev in the background), stored limits that no longer match are saved on their own and a
+  note lists what changed (e.g. `gpt-6-sol output 64k → 128k`). If anything else is pending, they wait for *Save*.
 - **Cache lifetime:** when every member's cache level is known and none is *no cache*, Codex-style lists also carry
   `prompt_cache_ttl_seconds` (the shortest level; *longer* counts as 1 hour). pi's CPA extension uses it instead of
   its catalog value, so a pool of Claude logins (1 hour) isn't refreshed every few minutes.

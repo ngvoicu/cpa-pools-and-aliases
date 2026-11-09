@@ -451,7 +451,44 @@ async function load() {
   show("loading", false); show("app", true);
   render();
   refreshHits();
-  loadPublicCatalogs().then((ext) => { if (ext && S) { S.ext = ext; render(); } });
+  const loaded = S;
+  loadPublicCatalogs().then((ext) => {
+    if (!ext || S !== loaded) return;
+    S.ext = ext; render();
+    syncLimits().catch((e) => toast(e.message, true));
+  });
+}
+
+// Stored limits follow the catalogs. Once every source of limits is in (CPA's catalogs, then OpenRouter's list and
+// models.dev in the background), stored limits that no longer match are saved on their own, but only when nothing
+// else is pending: otherwise they wait for the user's Save with the rest. Without this, model lists keep reporting
+// the old numbers after a catalog change until someone saves the page.
+async function syncLimits() {
+  const st = S;
+  if (!st || st.limitsSynced) return;
+  st.limitsSynced = true;
+  const { changes, errors, limitsNow, limitsChanged } = plan();
+  if (!limitsChanged || errors.length || changes.length !== 1) return;
+  const before = normLimits(st.limits);
+  await api("PUT", `/config/plugins/configs/${PLUGIN_ID}/limits`, limitsNow);
+  if (S !== st) return;
+  st.limits = limitsNow;
+  st.pluginCfg = { ...st.pluginCfg, limits: limitsNow };
+  render();
+  const what = limitChanges(before, limitsNow);
+  toast(`Limits updated from the catalogs${what ? ": " + what : ""}.`);
+}
+function limitChanges(before, after) {
+  const fmt = (k, v) => (!v ? "none" : k === "cache-ttl" ? (v >= 3600 ? `${+(v / 3600).toFixed(1)} h` : `${Math.round(v / 60)} min`) : fmtTok(v));
+  const label = { context: "context", output: "output", "cache-ttl": "cache" };
+  const out = [];
+  for (const pool of [...new Set([...Object.keys(before), ...Object.keys(after)])].sort(byName)) {
+    const a = before[pool] || {}, b = after[pool] || {};
+    for (const k of ["context", "output", "cache-ttl"]) {
+      if ((a[k] || 0) !== (b[k] || 0)) out.push(`${pool} ${label[k]} ${fmt(k, a[k])} → ${fmt(k, b[k])}`);
+    }
+  }
+  return out.join(", ");
 }
 
 // Upstream models a source can contribute (aliases are mapped back to the model behind them).
