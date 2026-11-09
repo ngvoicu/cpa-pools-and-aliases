@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.1 — 2026-11-09
+
+- **Cache hits say when counting started.** The counts live in memory, so after CPA or the plugin restarts, "last 24 h"
+  covered only the time since the restart and looked like a whole day. Windows shorter than their name are now
+  labelled by their start: `since 23:12`. Under an hour old, the pool shows one window instead of two identical ones.
+
 ## 1.5.0 — 2026-11-09
 
 - **New cache level: 2 hours.** For routes whose cache is measured to last hours, such as GPT-6.1 Sol on a

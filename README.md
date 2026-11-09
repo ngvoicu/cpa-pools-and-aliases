@@ -176,7 +176,8 @@ No request changes: the limits are what clients are told.
 CPA hands every finished request to the plugin with its token counts. For requests to a pool the plugin adds up, per
 member, the prompt tokens and how many of them were read from the cache, in 5-minute slots kept for a day. The page
 shows the **last hour** (or the last day when the last hour had none) on every member and both on the pool, and
-refreshes them every minute. The tooltip has the requests, failures and tokens read and written.
+refreshes them every minute. The counts start again when CPA or the plugin restarts; until a window is complete it is
+labelled by its start (`since 23:12`) instead of "last hour" or "last 24 h". The tooltip has the requests, failures and tokens read and written.
 
 - Providers count input two ways (Anthropic's excludes the cached part, OpenAI's includes it); the plugin reads each
   the right way, so rates compare across members.
