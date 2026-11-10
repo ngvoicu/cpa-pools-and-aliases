@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.0 — 2026-11-10
+
+- **Cache-hit counts can survive restarts.** Set `stats-file` in the plugin's config and the counts are read at start
+  and saved at most once a minute and when the plugin stops. Without it nothing changes: the counts stay in memory.
+  The pool tooltip says where the counts are kept; if the file can't be written, the pool line says "counts not
+  saved" with the reason. Keep the file outside CPA's auth directory.
+
 ## 1.6.0 — 2026-11-10
 
 - **Search instead of a dropdown.** Creating a pool and *Switch to…* now use a search box instead of a list of
