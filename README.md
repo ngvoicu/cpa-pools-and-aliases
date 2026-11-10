@@ -117,6 +117,7 @@ renders the page and rewrites pool entries in model lists (plain display name, l
 | Limits reported to clients | `plugins.configs.cpa-pools-and-aliases.limits` (pool → `context`, `output`, `cache-ttl`) | same, `/limits` |
 | Removed direct member (account) | `excluded_models` in its credential file, or `fork: false` on its extra-pool aliases | `PATCH …/credentials/fields` |
 | *Pools only* | `plugins.configs.cpa-pools-and-aliases.pools-only` | same, `/pools-only` |
+| Where cache-hit counts are kept (optional, set by hand) | `plugins.configs.cpa-pools-and-aliases.stats-file` | – |
 
 Aliases for names that aren't pools are never shown or changed. Deleting a pool removes only the aliases it
 created; accounts that serve the model directly keep serving it.
@@ -177,15 +178,31 @@ No request changes: the limits are what clients are told.
 CPA hands every finished request to the plugin with its token counts. For requests to a pool the plugin adds up, per
 member, the prompt tokens and how many of them were read from the cache, in 5-minute slots kept for a day. The page
 shows the **last hour** (or the last day when the last hour had none) on every member and both on the pool, and
-refreshes them every minute. The counts start again when CPA or the plugin restarts; until a window is complete it is
-labelled by its start (`since 23:12`) instead of "last hour" or "last 24 h". The tooltip has the requests, failures and tokens read and written.
+refreshes them every minute. Until a window is complete it is labelled by its start (`since 23:12`) instead of "last
+hour" or "last 24 h". The tooltip has the requests, failures and tokens read and written.
+
+**Keeping the counts across restarts.** By default the counts live in memory and start again when CPA or the plugin
+restarts. To keep them, name a file in the plugin's config:
+
+```yaml
+plugins:
+  configs:
+    cpa-pools-and-aliases:
+      stats-file: "~/.cpa-pools-and-aliases/cache-stats.json"
+```
+
+The plugin reads the file when it starts, and writes it at most once a minute while requests arrive and once more when
+it stops (written to a temporary file and renamed; owner-only on Unix). It holds the same numbers as the page: pool,
+member, token counts. Use an absolute path or `~/`. **Don't put it inside CPA's auth directory** (that includes the
+default plugins folder under it): CPA loads every `.json` there as a credential. If the file can't be written, the
+pool line says "counts not saved" and the tooltip gives the reason.
 
 - Providers count input two ways (Anthropic's excludes the cached part, OpenAI's includes it); the plugin reads each
   the right way, so rates compare across members.
 - The first message of every conversation is a miss, so even a perfect cache stays below 100%. A low rate on a busy
   member means its cache expires between messages (check its cache level, or warm it from the client).
-- Counts live in memory: they start again when CPA or the plugin restarts. They are served at
-  `GET /v0/management/cpa-pools-and-aliases/cache-stats` (management key), never with any key or prompt.
+- The counts are served at `GET /v0/management/cpa-pools-and-aliases/cache-stats` (management key), never with any
+  key or prompt.
 
 ### Good to know
 

@@ -677,7 +677,8 @@ function cacheSummary(p, mem) {
   return h("div", { class: "pool-cache" }, ...parts);
 }
 // Cache hit rates. CPA hands every finished request to the plugin, which counts, per pool and member, the prompt
-// tokens and how many of them were read from the cache (in memory, since CPA or the plugin last started). The page
+// tokens and how many of them were read from the cache (kept in the plugin's stats-file when one is set, else in
+// memory since CPA or the plugin last started). The page
 // shows the last hour (else the last day) and refreshes every minute without redrawing anything else.
 const HITS_PATH = "/v0/management/" + PLUGIN_ID + "/cache-stats";
 const HITS_LOW = 0.5;
@@ -719,7 +720,7 @@ function hitTitle(c, when) {
     `${fmtTok(c.read)} of ${fmtTok(c.prompt)} prompt tokens read from the cache, ${fmtTok(c.write)} written to it. ` +
     "The first message of a conversation always misses; a low rate on a busy member means its cache expires between messages.";
 }
-// The counts live in memory, so after a CPA or plugin restart a window can be shorter than its name: label it by
+// Counting can be younger than a window (a restart without a stats-file, or a new install): label the window by
 // the start time instead ("since 23:12"). Under an hour old, the hour and the day hold the same requests.
 function hitWindows() {
   const since = S && S.hits ? new Date(S.hits.since * 1000) : null;
@@ -732,8 +733,8 @@ function hitWindows() {
     one: age < 3600,
     hour: age < 3600 ? sinceLabel : "last hour",
     day: age < 86400 ? sinceLabel : "last 24 h",
-    dayLong: age < 86400 ? `Since ${at} (counting restarted then; none in the last hour)` : "Last 24 hours (none in the last hour)",
-    hourLong: age < 3600 ? `Since ${at} (counting restarted then)` : "Last hour",
+    dayLong: age < 86400 ? `Since ${at} (counting started then; none in the last hour)` : "Last 24 hours (none in the last hour)",
+    hourLong: age < 3600 ? `Since ${at} (counting started then)` : "Last hour",
   };
 }
 // One window for a row: the last hour when it had requests, else the last day.
@@ -741,6 +742,12 @@ const pick = (x, w = hitWindows()) => (x.hour.requests ? [x.hour, w.hourLong, w.
 function fillHits() {
   const since = S && S.hits ? new Date(S.hits.since * 1000).toLocaleString() : "";
   const w = hitWindows();
+  // Where the counts are kept: a file (and whether saving works), or memory only.
+  const file = S && S.hits ? S.hits.file : null;
+  const kept = !S || !S.hits || !("file" in S.hits) ? ""
+    : !file ? " Kept in memory only: they start again when CPA restarts (set stats-file in the plugin's config to keep them)."
+    : file.error ? ` Not saved: ${file.error}.`
+    : ` Kept across restarts in ${file.path}.`;
   for (const el of document.querySelectorAll(".pool-hits[data-pool]")) {
     const ph = poolHits(el.dataset.pool);
     el.replaceChildren(); el.className = "pool-hits"; el.title = "";
@@ -749,8 +756,9 @@ function fillHits() {
     const [c, when] = pick(ph.total, w);
     const low = pct(c) !== null && pct(c) < HITS_LOW * 100;
     el.textContent = "cache hits: " + (ph.total.hour.requests && !w.one ? `${w.hour} ${hitText(ph.total.hour)} · ` : "") + `${w.day} ${hitText(ph.total.day)}`;
+    if (file && file.error) el.textContent += " · counts not saved";
     el.classList.toggle("low", low);
-    el.title = hitTitle(c, when) + ` Counted since ${since}.`;
+    el.title = hitTitle(c, when) + ` Counted since ${since}.` + kept;
   }
   for (const el of document.querySelectorAll(".member .hits[data-pool]")) {
     const ph = poolHits(el.dataset.pool);

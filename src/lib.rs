@@ -21,15 +21,17 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_void, CStr};
+use std::io::Write;
 use std::os::raw::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 const ABI_VERSION: u32 = 1;
@@ -110,7 +112,9 @@ unsafe extern "C" fn plugin_free(ptr: *mut c_void, len: usize) {
     }
 }
 
-unsafe extern "C" fn plugin_shutdown() {}
+unsafe extern "C" fn plugin_shutdown() {
+    let _ = catch_unwind(|| save_stats(now_secs(), true));
+}
 
 unsafe fn write_response(response: *mut CliproxyBuffer, out: Vec<u8>) {
     if response.is_null() || out.is_empty() {
@@ -140,6 +144,8 @@ struct Settings {
     pools_only: bool,
     /// lower-cased pool id -> limits reported for the pool
     limits: HashMap<String, Limits>,
+    /// where the cache-hit counts are kept across restarts; unset = memory only
+    stats_file: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
@@ -176,6 +182,24 @@ fn parse_settings(yaml: &[u8]) -> Settings {
         pools: parse_pools(&doc),
         pools_only: doc.get("pools-only").and_then(|v| v.as_bool()).unwrap_or(false),
         limits: parse_limits(&doc),
+        stats_file: parse_stats_file(&doc),
+    }
+}
+
+/// `stats-file: "~/.cpa-pools/cache-stats.json"`. A leading `~/` is the home directory of the user CPA runs as.
+fn parse_stats_file(doc: &serde_yaml::Value) -> Option<PathBuf> {
+    let raw = doc.get("stats-file")?.as_str()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(expand_home(raw, std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))))
+}
+
+fn expand_home(raw: &str, home: Option<std::ffi::OsString>) -> PathBuf {
+    let rest = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\"));
+    match (rest, home.filter(|h| !h.is_empty())) {
+        (Some(rest), Some(home)) => PathBuf::from(home).join(rest),
+        _ => PathBuf::from(raw),
     }
 }
 
@@ -218,9 +242,11 @@ fn apply_config(request: &[u8]) {
     let req: LifecycleRequest = serde_json::from_slice(request).unwrap_or_default();
     let yaml = req.config_yaml.and_then(|s| B64.decode(s.as_bytes()).ok()).unwrap_or_default();
     let parsed = parse_settings(&yaml);
+    let stats_file = parsed.stats_file.clone();
     if let Ok(mut guard) = settings().write() {
         *guard = parsed;
     }
+    attach_stats_file(stats_file, now_secs());
 }
 
 // ------------------------------------------------------------------ dispatch
@@ -260,10 +286,14 @@ fn handle(method: &str, request: &[u8]) -> Vec<u8> {
             if let Ok(cfg) = settings().read() {
                 record_usage(request, now_secs(), &cfg.pools);
             }
+            save_stats(now_secs(), false);
             ok_envelope(json!({}))
         }
         "response.intercept_after" => ok_envelope(intercept_response(request).unwrap_or_else(|| json!({}))),
-        "plugin.quiesce" | "plugin.shutdown" => ok_envelope(json!({})),
+        "plugin.quiesce" | "plugin.shutdown" => {
+            save_stats(now_secs(), true);
+            ok_envelope(json!({}))
+        }
         _ => error_envelope("unknown_method", &format!("{PLUGIN_ID}: unknown method {method}")),
     }
 }
@@ -295,7 +325,8 @@ fn management_path(request: &[u8]) -> Option<String> {
 const SLOT_SECS: u64 = 300;
 const KEEP_SLOTS: u64 = 24 * 3600 / SLOT_SECS;
 
-#[derive(Clone, Copy, Default, Debug, PartialEq)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 struct Counter {
     requests: u64,
     failed: u64,
@@ -319,7 +350,8 @@ impl Counter {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 struct MemberStats {
     auth_id: String,
     provider: String,
@@ -329,15 +361,176 @@ struct MemberStats {
     total: Counter,
 }
 
+type PoolStats = HashMap<String, HashMap<String, MemberStats>>;
+
+#[derive(Default)]
 struct Stats {
     since: u64,
     /// lower-cased pool id -> member key (auth index, else auth id) -> counters
-    pools: HashMap<String, HashMap<String, MemberStats>>,
+    pools: PoolStats,
+    /// the configured `stats-file`
+    file: Option<PathBuf>,
+    /// counts changed since the last save
+    dirty: bool,
+    /// last save attempt and last save that worked (0 = none)
+    save_tried: u64,
+    saved: u64,
+    file_error: Option<String>,
 }
 
 fn stats() -> &'static Mutex<Stats> {
     static STATS: OnceLock<Mutex<Stats>> = OnceLock::new();
-    STATS.get_or_init(|| Mutex::new(Stats { since: now_secs(), pools: HashMap::new() }))
+    STATS.get_or_init(|| Mutex::new(Stats { since: now_secs(), ..Stats::default() }))
+}
+
+// ------------------------------------------------------------------ keeping the counts across restarts
+
+/// The counts are written at most this often while requests arrive, and once more when the plugin stops.
+const SAVE_EVERY_SECS: u64 = 60;
+const STATS_FILE_VERSION: u32 = 1;
+const RELATIVE_PATH: &str = "stats-file must be an absolute path or start with ~/";
+
+#[derive(Serialize)]
+struct SavedStatsRef<'a> {
+    version: u32,
+    since: u64,
+    saved: u64,
+    pools: &'a PoolStats,
+}
+
+#[derive(Deserialize)]
+struct SavedStats {
+    version: u32,
+    since: u64,
+    #[serde(default)]
+    pools: PoolStats,
+}
+
+fn encode_stats(since: u64, pools: &PoolStats, now: u64) -> Vec<u8> {
+    serde_json::to_vec(&SavedStatsRef { version: STATS_FILE_VERSION, since, saved: now, pools }).unwrap_or_default()
+}
+
+/// Reads a saved file: when counting started and the counters, without the slots older than a day.
+fn decode_stats(bytes: &[u8], now: u64) -> Option<(u64, PoolStats)> {
+    let mut saved: SavedStats = serde_json::from_slice(bytes).ok()?;
+    if saved.version != STATS_FILE_VERSION {
+        return None;
+    }
+    let slot = now / SLOT_SECS;
+    for members in saved.pools.values_mut() {
+        for m in members.values_mut() {
+            while m.slots.front().is_some_and(|(s, _)| *s + KEEP_SLOTS <= slot) {
+                m.slots.pop_front();
+            }
+        }
+    }
+    let since = if saved.since == 0 || saved.since > now { now } else { saved.since };
+    Some((since, saved.pools))
+}
+
+/// Writes next to the target and renames, so a crash never leaves half a file. Owner-only on Unix.
+fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)
+}
+
+/// Called on every (re)configure. A newly set file is read once, when nothing has been counted yet; counts already
+/// in memory win over the file and are written to it on the next save.
+fn attach_stats_file(path: Option<PathBuf>, now: u64) {
+    let Ok(mut st) = stats().lock() else { return };
+    attach_stats_file_to(&mut st, path, now);
+}
+
+fn attach_stats_file_to(st: &mut Stats, path: Option<PathBuf>, now: u64) {
+    if st.file == path {
+        return;
+    }
+    st.file = path.clone();
+    st.file_error = None;
+    st.saved = 0;
+    st.save_tried = 0;
+    let Some(path) = path else { return };
+    if !path.is_absolute() {
+        st.file_error = Some(RELATIVE_PATH.to_string());
+        return;
+    }
+    if !st.pools.is_empty() {
+        st.dirty = true;
+        return;
+    }
+    match std::fs::read(&path) {
+        Ok(bytes) => match decode_stats(&bytes, now) {
+            Some((since, pools)) => {
+                st.since = since;
+                st.pools = pools;
+            }
+            None => {
+                // Not ours or damaged: keep it aside instead of overwriting it.
+                let mut aside = path.as_os_str().to_owned();
+                aside.push(".unreadable");
+                let _ = std::fs::rename(&path, PathBuf::from(aside));
+                st.file_error = Some("the saved counts could not be read; counting starts again".to_string());
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => st.file_error = Some(format!("could not read the saved counts: {e}")),
+    }
+}
+
+/// Saves the counts when they changed and the last save is old enough (`force`: now, whatever its age).
+fn save_stats(now: u64, force: bool) {
+    let due = |st: &Stats| {
+        st.dirty && st.file.as_ref().is_some_and(|p| p.is_absolute()) && (force || now.saturating_sub(st.save_tried) >= SAVE_EVERY_SECS)
+    };
+    match stats().lock() {
+        Ok(st) if due(&st) => {}
+        _ => return,
+    }
+    // One writer at a time, and the bytes are taken after waiting for it, so an older snapshot never lands last.
+    static WRITER: Mutex<()> = Mutex::new(());
+    let _writer = WRITER.lock().unwrap_or_else(|e| e.into_inner());
+    let (path, bytes) = {
+        let Ok(mut st) = stats().lock() else { return };
+        if !due(&st) {
+            return;
+        }
+        let Some(path) = st.file.clone() else { return };
+        st.save_tried = now;
+        st.dirty = false;
+        (path, encode_stats(st.since, &st.pools, now))
+    };
+    let result = write_atomic(&path, &bytes);
+    let Ok(mut st) = stats().lock() else { return };
+    if st.file.as_deref() != Some(path.as_path()) {
+        return; // the file was changed meanwhile
+    }
+    match result {
+        Ok(()) => {
+            st.saved = now;
+            st.file_error = None;
+        }
+        Err(e) => {
+            st.dirty = true;
+            st.file_error = Some(format!("could not save the counts: {e}"));
+        }
+    }
 }
 
 fn now_secs() -> u64 {
@@ -440,13 +633,15 @@ fn record_usage(request: &[u8], now: u64, pools: &HashMap<String, String>) {
         c.cache_read = read;
         c.cache_write = write;
     }
-    let Ok(mut st) = stats().lock() else { return };
+    let Ok(mut guard) = stats().lock() else { return };
+    let st = &mut *guard;
     let m = st.pools.entry(pool).or_default().entry(key).or_default();
     m.auth_id = r.AuthID.trim().to_string();
     m.provider = r.Provider.trim().to_string();
     m.model = r.Model.trim().to_string();
     m.last_seen = now;
     m.total.add(&c);
+    st.dirty = true;
     let slot = now / SLOT_SECS;
     match m.slots.back_mut() {
         Some((s, counter)) if *s == slot => counter.add(&c),
@@ -468,7 +663,7 @@ fn window(m: &MemberStats, now: u64, secs: u64) -> Counter {
     c
 }
 
-/// Counters per pool and member for the last hour, the last day and since the plugin started.
+/// Counters per pool and member for the last hour, the last day and since counting started.
 fn stats_snapshot(now: u64) -> Value {
     let Ok(st) = stats().lock() else { return json!({}) };
     let mut pools = Map::new();
@@ -486,7 +681,11 @@ fn stats_snapshot(now: u64) -> Value {
         list.sort_by(|a, b| a["auth_index"].as_str().cmp(&b["auth_index"].as_str()));
         pools.insert(pool.clone(), json!({ "members": list }));
     }
-    json!({ "since": st.since, "now": now, "slot_seconds": SLOT_SECS, "pools": pools })
+    // `file`: null when the counts live in memory only; else where they are kept, the last save and any problem.
+    let file = st.file.as_ref().map(|p| {
+        json!({ "path": p.to_string_lossy(), "saved": if st.saved > 0 { json!(st.saved) } else { Value::Null }, "error": st.file_error })
+    });
+    json!({ "since": st.since, "now": now, "slot_seconds": SLOT_SECS, "file": file, "pools": pools })
 }
 
 // ------------------------------------------------------------------ model lists
@@ -758,6 +957,132 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_stats_file_setting() {
+        assert_eq!(parse_settings(b"pools: [zeus]\n").stats_file, None);
+        assert_eq!(parse_settings(b"stats-file: '  '\n").stats_file, None);
+        assert_eq!(parse_settings(b"stats-file: /var/lib/cpa/hits.json\n").stats_file, Some(PathBuf::from("/var/lib/cpa/hits.json")));
+        assert_eq!(expand_home("~/x/hits.json", Some("/home/u".into())), PathBuf::from("/home/u/x/hits.json"));
+        assert_eq!(expand_home("~/x/hits.json", None), PathBuf::from("~/x/hits.json"));
+        assert_eq!(expand_home("/abs/~/hits.json", Some("/home/u".into())), PathBuf::from("/abs/~/hits.json"));
+    }
+
+    fn member(slots: &[(u64, u64)]) -> MemberStats {
+        let mut m = MemberStats { auth_id: "id-a1".into(), provider: "claude".into(), model: "m".into(), ..MemberStats::default() };
+        for (slot, prompt) in slots {
+            let c = Counter { requests: 1, prompt: *prompt, cache_read: prompt / 2, ..Counter::default() };
+            m.slots.push_back((*slot, c));
+            m.total.add(&c);
+            m.last_seen = slot * SLOT_SECS;
+        }
+        m
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("cpa-pools-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn saved_counts_survive_a_restart() {
+        let now = 1_800_000_000;
+        let slot = now / SLOT_SECS;
+        let mut pools: PoolStats = HashMap::new();
+        pools.entry("zeus".into()).or_default().insert("a1".into(), member(&[(slot - KEEP_SLOTS - 5, 1000), (slot - 3, 4000), (slot, 6000)]));
+        let bytes = encode_stats(now - 9000, &pools, now);
+        assert!(!String::from_utf8_lossy(&bytes).contains("sk-"));
+
+        // read back at once: everything is there
+        let (since, back) = decode_stats(&bytes, now).expect("decodes");
+        assert_eq!(since, now - 9000);
+        let m = &back["zeus"]["a1"];
+        assert_eq!((m.slots.len(), m.total.requests, m.total.prompt, m.total.cache_read), (2, 3, 11000, 5500));
+        assert_eq!((m.auth_id.as_str(), m.provider.as_str(), m.last_seen), ("id-a1", "claude", slot * SLOT_SECS));
+
+        // read back two days later: the slots are gone, the totals and the start stay
+        let (since, back) = decode_stats(&bytes, now + 2 * 24 * 3600).expect("decodes");
+        assert_eq!((since, back["zeus"]["a1"].slots.len(), back["zeus"]["a1"].total.requests), (now - 9000, 0, 3));
+
+        // a start in the future (clock moved back) falls back to now; other formats are refused
+        assert_eq!(decode_stats(&encode_stats(now + 50, &pools, now), now).map(|x| x.0), Some(now));
+        assert!(decode_stats(br#"{"version":2,"since":1,"pools":{}}"#, now).is_none());
+        assert!(decode_stats(b"not json", now).is_none());
+    }
+
+    #[test]
+    fn restores_from_the_file_only_when_nothing_was_counted() {
+        let now = 1_800_000_000;
+        let dir = temp_dir("restore");
+        let path = dir.join("nested").join("hits.json");
+        let mut pools: PoolStats = HashMap::new();
+        pools.entry("zeus".into()).or_default().insert("a1".into(), member(&[(now / SLOT_SECS, 4000)]));
+        write_atomic(&path, &encode_stats(now - 500, &pools, now)).expect("writes, creating the folders");
+        assert!(!dir.join("nested").join("hits.json.tmp").exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+
+        // an empty plugin takes the file's counts and its start
+        let mut st = Stats { since: now, ..Stats::default() };
+        attach_stats_file_to(&mut st, Some(path.clone()), now);
+        assert_eq!((st.since, st.pools["zeus"]["a1"].total.prompt, st.dirty, st.file_error.clone()), (now - 500, 4000, false, None));
+
+        // counts already in memory win, and are due for saving
+        let mut busy = Stats { since: now, ..Stats::default() };
+        busy.pools.entry("argon".into()).or_default().insert("b2".into(), member(&[(now / SLOT_SECS, 10)]));
+        attach_stats_file_to(&mut busy, Some(path.clone()), now);
+        assert!(busy.pools.contains_key("argon") && !busy.pools.contains_key("zeus") && busy.dirty);
+
+        // a relative path is refused with a message; a missing file is fine; a damaged one is set aside
+        let mut rel = Stats::default();
+        attach_stats_file_to(&mut rel, Some(PathBuf::from("hits.json")), now);
+        assert_eq!(rel.file_error.as_deref(), Some(RELATIVE_PATH));
+        let mut fresh = Stats::default();
+        attach_stats_file_to(&mut fresh, Some(dir.join("none.json")), now);
+        assert_eq!((fresh.file_error.clone(), fresh.pools.len()), (None, 0));
+        let bad = dir.join("bad.json");
+        std::fs::write(&bad, b"{ half a file").unwrap();
+        let mut damaged = Stats::default();
+        attach_stats_file_to(&mut damaged, Some(bad.clone()), now);
+        assert!(damaged.file_error.is_some() && !bad.exists() && dir.join("bad.json.unreadable").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saves_through_the_plugin_calls() {
+        let dir = temp_dir("calls");
+        let path = dir.join("hits.json");
+        // "zeus" stays a pool throughout: other tests share the plugin's settings
+        let cfg = |file: Option<&Path>| {
+            let mut yaml = "pools: [zeus, saved/zeus]\n".to_string();
+            if let Some(f) = file {
+                yaml.push_str(&format!("stats-file: {}\n", f.display()));
+            }
+            json!({ "config_yaml": B64.encode(yaml) }).to_string()
+        };
+        handle("plugin.register", cfg(Some(&path)).as_bytes());
+        handle("usage.handle", &usage("saved/zeus", "s1", "claude", detail(100, 3000, 900, 20, 4020), false, true));
+        handle("plugin.shutdown", b"{}");
+        let (_, pools) = decode_stats(&std::fs::read(&path).expect("saved when the plugin stops"), now_secs()).expect("decodes");
+        assert_eq!(pools["saved/zeus"]["s1"].total, Counter { requests: 1, failed: 0, prompt: 4000, cache_read: 3000, cache_write: 900 });
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("sk-"), "never keeps keys");
+        let snap = stats_snapshot(now_secs());
+        assert_eq!(snap["file"]["path"], path.to_string_lossy().as_ref());
+        assert!(snap["file"]["saved"].as_u64().is_some() && snap["file"]["error"].is_null());
+        // without the setting the counts stay in memory and nothing more is written
+        handle("plugin.reconfigure", cfg(None).as_bytes());
+        assert!(stats_snapshot(now_secs())["file"].is_null());
+        std::fs::remove_file(&path).unwrap();
+        handle("usage.handle", &usage("saved/zeus", "s1", "claude", detail(100, 3000, 900, 20, 4020), false, true));
+        handle("plugin.shutdown", b"{}");
+        assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn serves_stats_on_its_route_and_the_page_elsewhere() {
         let reg: Value = serde_json::from_slice(&handle("management.register", b"{}")).unwrap();
         assert_eq!(reg["result"]["routes"][0]["Path"], STATS_PATH);
@@ -766,6 +1091,7 @@ mod tests {
         let out: Value = serde_json::from_slice(&handle("management.handle", req.as_bytes())).unwrap();
         let body: Value = serde_json::from_slice(&B64.decode(out["result"]["Body"].as_str().unwrap()).unwrap()).unwrap();
         assert!(body["since"].as_u64().is_some() && body["pools"].is_object());
+        assert!(body.get("file").is_some());
         let req = json!({"Method":"GET","Path":"/v0/resource/plugins/cpa-pools-and-aliases/ui"}).to_string();
         let out: Value = serde_json::from_slice(&handle("management.handle", req.as_bytes())).unwrap();
         assert_eq!(out["result"]["Headers"]["content-type"][0], "text/html; charset=utf-8");
