@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.0 — 2026-11-10
+
+- **Search instead of a dropdown.** Creating a pool and *Switch to…* now use a search box instead of a list of
+  every model (hundreds with OpenRouter). Type part of a model, an account or a provider (`opus`, `outlook`,
+  `devin fable`); results are newest first (catalog release date, then version) and each row names the accounts and
+  keys that serve the model. Arrow keys and Enter work. Models already used by another pool are shown greyed out.
+
 ## 1.5.1 — 2026-11-09
 
 - **Cache hits say when counting started.** The counts live in memory, so after CPA or the plugin restarts, "last 24 h"

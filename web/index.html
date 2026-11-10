@@ -128,6 +128,19 @@ input:focus, select:focus { border-color: var(--accent); }
 .src-title { display: flex; align-items: center; gap: 7px; padding: 6px 4px; font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; }
 .src-title .sub2 { color: var(--faint); font-weight: 400; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .src-title .caret { color: var(--faint); width: 10px; }
+.mp { position: relative; display: inline-block; }
+.mp-input { width: 300px; }
+.mp-list { position: absolute; z-index: 50; top: calc(100% + 4px); left: 0; width: min(680px, 92vw); max-height: 440px; overflow: auto;
+  background: var(--panel); border: 1px solid var(--border2); border-radius: 10px; box-shadow: 0 10px 32px rgba(0,0,0,.35); padding: 4px; }
+.mp-row { display: flex; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.mp-row.on { background: var(--accent-bg); }
+.mp-row.off { opacity: .45; cursor: not-allowed; }
+.mp-id { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+.mp-note { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.mp-srcs { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.mp-src { font-size: 11px; border: 1px solid var(--border2); border-radius: 5px; padding: 0 6px; color: var(--muted); white-space: nowrap; }
+.mp-src i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
+.mp-foot { color: var(--faint); font-size: 11px; padding: 6px 8px; }
 .chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 4px 4px 21px; }
 .chip { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--border2); background: var(--panel2); border-radius: 6px;
   padding: 3px 7px; cursor: grab; user-select: none; }
@@ -185,7 +198,7 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 
   <section id="app" class="hidden">
     <div class="toolbar">
-      <select class="pick" id="newModel" style="width:260px"><option value="">Pick a model…</option></select>
+      <input type="hidden" id="newModel" value=""><span id="newModelPicker"></span>
       <input type="text" id="newPrefix" placeholder="name (extra pool)" spellcheck="false" style="width:150px"
         title="Leave empty for the model's main pool. A name such as subs creates an extra pool subs/<model> with only the members you add.">
       <button class="btn primary" id="addPool">+ Create pool</button>
@@ -380,6 +393,7 @@ async function load() {
         id: m.id || m.name,
         ctx: Number(m.context_length) || Number(m.inputTokenLimit) || 0,
         out: Number(m.max_completion_tokens) || Number(m.outputTokenLimit) || 0,
+        created: Number(m.created) || 0,
       })).filter((m) => m.id);
     } catch (_) { limitCat[p] = []; }
     if (needCatalog.has(p)) catalogs[p] = limitCat[p].map((m) => m.id);
@@ -529,9 +543,16 @@ function modelCatalog() {
     e.names.set(o.name, (e.names.get(o.name) || 0) + 1);
     e.sources.add(s.id);
   }
+  // Release dates from CPA's catalogs, for "newest first" in the model picker.
+  const created = new Map();
+  for (const list of Object.values(S.limitCat || {})) for (const x of list) {
+    const k = mkey(x.id);
+    if (x.created > (created.get(k) || 0)) created.set(k, x.created);
+  }
   for (const e of m.values()) {
     const plain = [...e.names].filter(([n]) => !n.includes("/")).sort((a, b) => b[1] - a[1] || byName(a[0], b[0]));
     e.id = plain.length ? plain[0][0] : [...e.names.keys()][0].replace(/^.*\//, "");
+    e.created = created.get(e.key) || 0;
   }
   return m;
 }
@@ -1151,19 +1172,105 @@ function render() {
   $("save").title = errors.length ? "Fix the pools marked in red first" : "";
 }
 
-function modelOptionLabel(e) {
-  return `${e.id}  ·  ${e.sources.size} source${e.sources.size === 1 ? "" : "s"}`;
+// ------------------------------------------------------------------ model picker
+// A search box over every model the sources offer: type part of a name, an account or a provider. Newest first
+// (catalog release date, then version), each row naming the accounts and keys that serve it.
+const PICKER_LIMIT = 50;
+const shortAccount = (label) => String(label || "").replace(/^([^@\s]+)@([^.]+)\..*$/, "$1@$2");
+function pickerSourceChip(s) {
+  const p = prov(s.provider);
+  // OpenAI-compatible entries are named after their service (e.g. "OpenRouter"): the name alone says it.
+  const text = s.provider === "openai-compatibility" ? s.label : `${p.label}${s.kind === "apikey" ? " key" : ""} · ${shortAccount(s.label)}`;
+  return h("span", { class: "mp-src", title: srcLabel(s) }, h("i", { style: `background:${p.color}` }), text);
+}
+function pickerMatches(query) {
+  const terms = lc(query).split(/\s+/).filter(Boolean);
+  const scored = [];
+  for (const e of S.models.values()) {
+    const srcs = [...e.sources].map(srcById).filter(Boolean);
+    const hay = [e.id, ...e.names.keys(), ...srcs.map((x) => srcLabel(x))].join(" ").toLowerCase();
+    if (!terms.every((t) => hay.includes(t))) continue;
+    const id = lc(e.id), q = terms.join(" ");
+    scored.push({ e, srcs, score: !q ? 0 : id.startsWith(q) ? 0 : id.includes(q) ? 1 : 2 });
+  }
+  return scored.sort((a, b) => a.score - b.score || (b.e.created || 0) - (a.e.created || 0) || byName(b.e.id, a.e.id));
+}
+// modelPicker({ placeholder, onPick(key), state(e) -> { note, off } }) returns the search box element.
+function modelPicker(opts) {
+  const input = h("input", { type: "text", class: "mp-input", placeholder: opts.placeholder, spellcheck: "false", autocomplete: "off" });
+  const list = h("div", { class: "mp-list hidden" });
+  const box = h("span", { class: "mp" }, input, list);
+  let rows = [], active = -1;
+  const close = () => { list.classList.add("hidden"); active = -1; };
+  const highlight = (i) => {
+    rows.forEach((r, n) => r.el.classList.toggle("on", n === i));
+    active = i;
+    if (rows[i]) rows[i].el.scrollIntoView({ block: "nearest" });
+  };
+  const pick = (r) => {
+    if (!r || r.off) return;
+    close();
+    input.value = r.e.id;
+    opts.onPick(r.e.key, input);
+  };
+  const fill = () => {
+    if (!S) return;
+    const all = pickerMatches(input.value);
+    rows = all.slice(0, PICKER_LIMIT).map(({ e, srcs }) => {
+      const st = (opts.state && opts.state(e)) || {};
+      const el = h("div", { class: "mp-row" + (st.off ? " off" : ""), title: st.off || "" },
+        h("span", { class: "mp-id" }, e.id), st.note ? h("span", { class: "mp-note" }, st.note) : null,
+        h("span", { class: "mp-srcs" }, srcs.slice(0, 5).map(pickerSourceChip),
+          srcs.length > 5 ? h("span", { class: "mp-src" }, `+${srcs.length - 5}`) : null));
+      return { e, el, off: st.off };
+    });
+    rows.forEach((r, n) => {
+      r.el.addEventListener("mousedown", (ev) => { ev.preventDefault(); pick(r); });
+      r.el.addEventListener("mousemove", () => { if (active !== n) highlight(n); });
+    });
+    const foot = !all.length ? "No model matches." : all.length > rows.length
+      ? `${rows.length} of ${all.length}, newest first. Type to narrow down (model, account or provider).`
+      : `${all.length} model${all.length === 1 ? "" : "s"}, newest first.`;
+    list.replaceChildren(...rows.map((r) => r.el), h("div", { class: "mp-foot" }, foot));
+    list.classList.remove("hidden");
+    highlight(rows.findIndex((r) => !r.off));
+  };
+  input.addEventListener("focus", () => { input.select(); fill(); });
+  input.addEventListener("input", fill);
+  input.addEventListener("blur", close);
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      ev.preventDefault();
+      if (list.classList.contains("hidden")) { fill(); return; }
+      const step = ev.key === "ArrowDown" ? 1 : -1;
+      for (let i = active + step; i >= 0 && i < rows.length; i += step) if (!rows[i].off) { highlight(i); break; }
+    } else if (ev.key === "Enter") {
+      ev.preventDefault();
+      pick(rows[active]);
+    } else if (ev.key === "Escape") {
+      close(); input.blur();
+    }
+  });
+  return box;
 }
 
+let newModelPicker = null;
 function renderNewModel() {
-  const sel = $("newModel");
-  const cur = sel.value;
-  sel.replaceChildren(h("option", { value: "" }, "Pick a model…"));
-  for (const e of [...S.models.values()].sort((a, b) => byName(a.id, b.id))) {
-    const n = S.pools.filter((p) => !p.deleted && !p.error && mkey(p.name) === e.key).length;
-    sel.append(h("option", { value: e.key }, modelOptionLabel(e) + (n ? `  (${n} pool${n === 1 ? "" : "s"})` : "")));
+  if (!newModelPicker) {
+    newModelPicker = modelPicker({
+      placeholder: "Search a model, account or provider…",
+      onPick: (key) => { $("newModel").value = key; },
+      state: (e) => {
+        const n = S.pools.filter((p) => !p.deleted && !p.error && mkey(p.name) === e.key).length;
+        return n ? { note: `${n} pool${n === 1 ? "" : "s"}` } : {};
+      },
+    });
+    newModelPicker.querySelector("input").addEventListener("input", () => { $("newModel").value = ""; });
+    $("newModelPicker").replaceChildren(newModelPicker);
   }
-  sel.value = cur || "";
+  const e = S.models.get($("newModel").value);
+  newModelPicker.querySelector("input").value = e ? e.id : "";
+  if (!e) $("newModel").value = "";
 }
 
 function renderSee() {
@@ -1216,13 +1323,16 @@ function poolCard(p) {
         onclick: () => { if (p.isNew) S.pools.splice(S.pools.indexOf(p), 1); else p.deleted = true; render(); } }, "✕");
   card.append(h("div", { class: "pool-head" }, name, prefixInput, del));
 
-  const sw = h("select", { class: "pick", disabled: p.deleted, title: "Move every member to another model, e.g. when a new version ships",
-    onchange: (ev) => { if (ev.target.value) switchModel(p, ev.target.value); } }, h("option", { value: "" }, "Switch to…"));
-  for (const e of [...S.models.values()].sort((a, b) => byName(a.id, b.id))) {
-    if (e.key === mkey(p.name) && !p.error) continue;
-    const used = poolByName(prefixOf(p.name) ? `${prefixOf(p.name)}/${e.id}` : e.id, p);
-    sw.append(h("option", { value: e.key, disabled: !!used }, modelOptionLabel(e) + (used ? `  (pool ${used.name})` : "")));
-  }
+  const sw = p.deleted ? null : modelPicker({
+    placeholder: "Switch to…",
+    onPick: (key) => switchModel(p, key),
+    state: (e) => {
+      if (e.key === mkey(p.name) && !p.error) return { off: "This pool's model", note: "current" };
+      const used = poolByName(prefixOf(p.name) ? `${prefixOf(p.name)}/${e.id}` : e.id, p);
+      return used ? { off: `Already pool ${used.name}`, note: `pool ${used.name}` } : {};
+    },
+  });
+  if (sw) { sw.title = "Move every member to another model, e.g. when a new version ships"; sw.querySelector("input").style.width = "190px"; }
   if (p.error && !p.deleted) card.append(h("div", { class: "pool-err" }, p.error));
   card.append(h("div", { class: "pool-model" },
     h("span", {}, `${mem.size} source${mem.size === 1 ? "" : "s"}`),

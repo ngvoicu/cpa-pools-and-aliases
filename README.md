@@ -96,7 +96,8 @@ Requires CPA 8 with plugins enabled (tested on 8.0.50 and 8.0.53).
    ```
 
 3. **Open** *Plugins → Pools and Aliases* in the console (or `http://<cpa>/v0/resource/plugins/cpa-pools-and-aliases/ui`).
-4. **Create a pool:** pick a model at the top, press *Create pool*, review, save. CPA applies it without a restart.
+4. **Create a pool:** search for a model at the top (by model, account or provider; newest first, with the accounts and
+   keys that serve it), press *Create pool*, review, save. CPA applies it without a restart.
 
 Your tools don't change: they keep asking for `claude-opus-5-5`, and CPA now spreads those requests across the pool.
 
