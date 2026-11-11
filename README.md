@@ -127,34 +127,38 @@ created; accounts that serve the model directly keep serving it.
 A prompt cache belongs to the account that served the request. Session affinity keeps a conversation on one member,
 so it gets that member's cache; a conversation that moves to another member starts cold.
 
-- **Claude members are known:** logins get a 1-hour cache from CPA, API keys Anthropic's 5-minute default (1 hour on
-  keys with the `claude-code-cli` fingerprint profile).
-- **Every other member** (Devin, Codex, OpenAI-compatible keys, ...) depends on the provider and the model, so you set it
-  per pool member: *no cache*, *5 min*, *30 min*, *1 hour* or *2 hours*, for example from
-  [cache-ttl-probe](https://github.com/ngvoicu/cache-ttl-probe) measurements. *2 hours* fits routes whose cache is
-  measured to last hours (e.g. GPT-6.1 Sol on a ChatGPT/Codex login); nothing longer is offered, because past ~2 hours
-  the cache is a coin flip on every route measured. The *longer* level of earlier versions is read as *1 hour* (what
-  clients were already told) and saved that way on the next save.
+- **Every level is your choice**, per pool member: *no cache*, *5 min*, *30 min*, *1 hour* or *2 hours*. The lifetime
+  depends on the account and the model, not on the model alone. The plugin holds **no lifetime of its own**: it only
+  suggests (below), and what you pick is what clients are told.
+- *2 hours* fits routes whose cache is measured to last hours (e.g. GPT-6.1 Sol on a ChatGPT/Codex login); nothing
+  longer is offered, because past ~2 hours the cache is a coin flip on every route measured.
+- Before 2.0 the levels of Claude members were a rule inside the plugin (logins 1 hour, API keys 5 minutes) and were
+  never stored. On upgrade nothing changes for clients: each Claude member starts with the lifetime its pool already
+  reported, the review lists them (`as before; now stored like every other level`), and the next save stores them.
 - The pool summary shows the shortest and longest level. Mixed pools work; clients that refresh caches (pi) just have
   to plan for the shortest.
 - **No cache** marks a member whose conversations pay the full price on every message (for example Claude through an
   OpenAI-compatible OpenRouter entry, which gets no cache markers). The member is highlighted, the review warns about
   it, *Leave out* removes it, and it doesn't rejoin automatically.
 
-Members without a level get a **suggestion** with one-click *Use*:
+Members without a level get a **suggestion** with one-click *Use* (and *Use suggestions* fills everything a pool
+hasn't set yet). In this order:
 
 1. **Measured, when there is a measurement.** [`observed.json`](https://github.com/ngvoicu/cache-ttl-probe/blob/main/observed.json)
    holds public measurements of how long each route really keeps a cache. A run on the same route and model, made
    through CPA, decides: the level at or below the longest wait at which every check still found the cache. Routes
    covered: Codex, Devin, Meta and Antigravity logins, OpenRouter entries, OpenAI API keys. A vendor's documented
    lifetime often doesn't hold on a reseller: GPT-6 Astra is documented at 30 minutes and measured at 5 through Devin.
-2. **Documented, otherwise** (models.dev). On OpenRouter entries CPA marks requests for caching (since
+2. **Known, when it follows from how CPA builds the request.** The same file has a short `known` list of lifetimes
+   that were not measured: CPA asks Anthropic for the 1-hour cache on Claude logins, and a Claude API key gets the
+   5-minute default (1 hour with the `claude-code-cli` fingerprint profile).
+3. **Documented, otherwise** (models.dev). On OpenRouter entries CPA marks requests for caching (since
    router-for-me/CLIProxyAPI#7284), so they keep the model's documented lifetime. Other OpenAI-compatible entries get
    no cache markers, so models that only cache on request (Claude) are suggested *no cache* there, while models that
    cache automatically keep their documented lifetime.
 
-A level you set **above** the measured one is flagged (`set to 30 min; measured: 5 min`) with *Use*; hover for the
-run behind it. Suggestions count only once you accept them. To add measurements for your own routes, see
+A level you set **above** the measured or known one is flagged (`set to 30 min; measured: 5 min`) with *Use*; hover
+for the run or the reason behind it. Suggestions count only once you accept them. To add measurements for your own routes, see
 [cache-ttl-probe](https://github.com/ngvoicu/cache-ttl-probe).
 
 The levels are information for you: the plugin doesn't change any request.
@@ -168,16 +172,22 @@ entries) and **models.dev** (smaller value of each when both have it, e.g. GPT-6
 marked with their source. Only members found nowhere show *limits unknown*. The page fetches both lists in the
 background and keeps a compact extract in the browser for a day.
 
-- The pool shows the **smallest** known values: every member can handle a request that fits them.
-- Differences under 10% (1.01M next to 1.05M) aren't flagged.
-- CPA on its own tells clients the limits of **one** member per pool (whichever it registered last). Saving stores each
-  pool's smallest limits, and the plugin writes them into every model list (Codex-style `context_window`,
-  `max_context_window`, `max_tokens`; Gemini `inputTokenLimit`, `outputTokenLimit`), so they no longer change with
-  registration order. Members with lower limits are highlighted with *Leave out*, or move the others to an extra pool.
-- **Stored limits follow the catalogs.** When the page opens and has every source of limits (CPA's catalogs, then
-  OpenRouter's list and models.dev in the background), stored limits that no longer match are saved on their own and a
-  note lists what changed (e.g. `gpt-6-sol output 64k → 128k`). If anything else is pending, they wait for *Save*.
-- **Cache lifetime:** when every member's cache level is known and none is *no cache*, Codex-style lists also carry
+- **The pool's limits are two fields you set** (`clients see: [922k] context · [128k] output`; type `922k`, `1M` or a
+  plain number). The **suggestion** next to them is the smallest value among the members: every member can handle a
+  request that fits it. *Use* takes it; an empty field means the pool reports nothing and clients see whatever CPA says.
+- **A measured window wins over a catalog.** `observed.json` also holds context windows found by sending requests of
+  growing size. A member's catalog value that the measurement agrees with stays; one it contradicts is replaced (a
+  list that says 1M where 925k was refused becomes the largest size that was accepted) and the member is marked
+  *measured*.
+- Differences under 10% between members (1.01M next to 1.05M) aren't flagged.
+- CPA on its own tells clients the limits of **one** member per pool (whichever it registered last). The plugin writes
+  the pool's stored limits into every model list (Codex-style `context_window`, `max_context_window`, `max_tokens`;
+  Gemini `inputTokenLimit`, `outputTokenLimit`), so they don't change with registration order. Members with lower
+  limits are highlighted with *Leave out*, or move the others to an extra pool.
+- **Nothing is saved on its own.** Before 2.0 stored limits followed the catalogs silently; now a catalog or a new
+  measurement that disagrees with your value shows as `suggested: …` with *Use*, and the review spells out what
+  clients will be told (e.g. `gpt-6-sol output 64k → 128k`).
+- **Cache lifetime:** when every member has a cache level and none is *no cache*, Codex-style lists also carry
   `prompt_cache_ttl_seconds` (the shortest level). pi's CPA extension uses it instead of
   its catalog value, so a pool of Claude logins (1 hour) isn't refreshed every few minutes.
 

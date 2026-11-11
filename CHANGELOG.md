@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.0.0 — 2026-11-11
+
+**The plugin no longer holds any fact about a model.** Cache lifetimes and limits are your choices, stored in the
+plugin's config; everything else only suggests.
+
+- **Claude members have a level like everyone else.** The rule "logins 1 hour, API keys 5 minutes" is gone from the
+  page. It now arrives as a suggestion from the `known` list of
+  [`observed.json`](https://github.com/ngvoicu/cache-ttl-probe/blob/main/observed.json), with its reason.
+  **Upgrading changes nothing for clients:** each Claude member starts with the lifetime its pool already reported,
+  the review lists them, and the next save stores them.
+- **A pool's context window and output limit are two fields you set.** They were computed and saved automatically.
+  The smallest value among the members is the suggestion, with *Use*. Stored values are kept as they are.
+- **Nothing is saved on its own any more.** Limits used to follow the catalogs silently when the page opened. Now a
+  catalog or measurement that disagrees with your value shows as `suggested: …`; the review spells out every
+  change in what clients are told.
+- **Measured context windows.** A member's window comes from `observed.json` when it was measured there: a catalog
+  value the measurement contradicts is replaced and marked *measured*.
+- **Suggestion order:** measured, then known (follows from how CPA builds the request), then documented
+  (models.dev). A level set above the measured or known one is flagged.
+- **Use suggestions:** one button per pool fills in everything that isn't set yet. It never changes a value you set.
+
+Breaking: a pool created in 2.0 reports no limits and no cache lifetime until you set them or press *Use
+suggestions*. The config format is unchanged, so going back to 1.8 works.
+
 ## 1.8.0 — 2026-11-11
 
 - **Cache levels are suggested from measurements first.** The page now reads
