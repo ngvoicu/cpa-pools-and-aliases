@@ -13,7 +13,7 @@ const source = [
   pick(/^const cacheLabel = .*$/m, "cacheLabel"),
   pick(/^const isOpenRouter = .*$/m, "isOpenRouter"),
   pick(/\/\/ >>> measured-cache[\s\S]*?\/\/ <<< measured-cache/, "measured-cache block"),
-  "return { observedExtract, observedRoute, measuredCache, metaRetention, setState: (v) => { S = v; } };",
+  "return { observedExtract, observedRoute, measuredCache, metaRetention, knownExtract, knownCacheFor, limitsExtract, measuredLimits, parseTok, levelForSeconds, setState: (v) => { S = v; } };",
 ].join("\n");
 const page = new Function("let S = {};\n" + source)();
 
@@ -37,14 +37,29 @@ const doc = { cache: [
   run("d/D3", "devin", "cliproxyapi", "swe-2", [], { control: { warm: 0, total: 1 }, date: "2026-11-04" }),
   run("old/C1", "codex-subscription", "pi+cliproxyapi", "gpt-6.1-terra", [["5m", 3, 3]], { safe: 300, latest: false }),
 ] };
-const obs = page.observedExtract(doc);
-const state = (config = {}) => page.setState({ ext: { obs }, config });
+doc.known = [
+  { route: "claude-subscription", client: "cliproxyapi", model: "*", ttl_s: 3600, basis: "CPA asks for the 1-hour cache on Claude logins.", source: "x" },
+  { route: "anthropic-api", client: "cliproxyapi", model: "*", ttl_s: 300, basis: "A Claude key gets the 5-minute cache.", source: "x" },
+  { route: "anthropic-api", client: "cliproxyapi", model: "*", when: { "fingerprint-profile": "claude-code-cli" }, ttl_s: 3600, basis: "A key with the claude-code-cli profile gets 1 hour.", source: "x" },
+  { route: "anthropic-api", client: "some-other-proxy", model: "*", ttl_s: 7200, basis: "not about CPA", source: "x" },
+];
+doc.limits = [
+  { route: "codex-subscription", model: "gpt-6.1-terra", input_accepted: 920870, input_refused: 921875 },
+  { route: "devin", model: "gpt-6-1-sol", input_accepted: 915390, input_refused: 925000 },
+  { route: "claude-subscription", model: "claude-opus-5-5", context: 1000000, output: 128000 },
+];
+const obs = page.observedExtract(doc), known = page.knownExtract(doc), lim = page.limitsExtract(doc);
+const state = (config = {}) => page.setState({ ext: { obs, known, lim }, config });
 const devin = { kind: "auth", provider: "devin" }, codex = { kind: "auth", provider: "codex" }, meta = { kind: "auth", provider: "meta" };
 const openrouter = { kind: "apikey", provider: "openai-compatibility", baseUrl: "https://openrouter.ai/api/v1" };
 const openaiKey = { kind: "apikey", provider: "codex", baseUrl: "https://api.openai.com/v1" };
 state();
 
 // routes
+const claudeLogin = { kind: "auth", provider: "claude" }, claudeKey = { kind: "apikey", provider: "claude", baseUrl: "", profile: "" };
+assert.equal(page.observedRoute(claudeLogin), "claude-subscription");
+assert.equal(page.observedRoute(claudeKey), "anthropic-api");
+assert.equal(page.observedRoute({ kind: "apikey", provider: "claude", baseUrl: "https://relay.example.com" }), "", "a Claude key on someone else's address is not Anthropic's API");
 assert.equal(page.observedRoute(devin), "devin");
 assert.equal(page.observedRoute(codex), "codex-subscription");
 assert.equal(page.observedRoute(openrouter), "openrouter");
@@ -97,5 +112,38 @@ assert.deepEqual(page.observedExtract(null), []);
 assert.deepEqual(page.observedExtract({ cache: "x" }), []);
 page.setState({ ext: null, config: {} });
 assert.equal(page.measuredCache(devin, "devin/gpt-6-astra"), null);
+
+// known lifetimes come from the file, not from the page: logins 1 hour, keys 5 minutes, the profile exception
+state();
+assert.equal(known.length, 3, "rows about another proxy are dropped");
+let k = page.knownCacheFor(claudeLogin, "claude-opus-5-5");
+assert.equal(k.level, "1h"); assert.equal(k.src, "known"); assert.match(k.why, /Not measured/);
+assert.equal(page.knownCacheFor(claudeKey, "claude-opus-5-5").level, "5m");
+assert.equal(page.knownCacheFor({ ...claudeKey, profile: "Claude-Code-CLI" }, "claude-opus-5-5").level, "1h", "the more specific row wins");
+assert.equal(page.knownCacheFor(devin, "devin/claude-opus-5-5"), null);
+page.setState({ ext: { obs, known: [], lim: [] }, config: {} });
+assert.equal(page.knownCacheFor(claudeLogin, "claude-opus-5-5"), null, "without the file the page knows nothing about Claude");
+state();
+assert.equal(page.levelForSeconds(0), "none"); assert.equal(page.levelForSeconds(299), "none"); assert.equal(page.levelForSeconds(14400), "2h");
+
+// measured limits: a catalog value the measurement agrees with stays, one it contradicts is replaced
+let l = page.measuredLimits(codex, "gpt-6.1-terra", 922000, 128000);
+assert.equal(l.ctx, 920870, "922,000 was refused (921,875 is the smallest refused size)");
+assert.equal(l.changed, true);
+l = page.measuredLimits(codex, "gpt-6.1-terra", 921000, 128000);
+assert.equal(l.ctx, 921000); assert.equal(l.changed, false, "between accepted and refused: consistent");
+l = page.measuredLimits(devin, "devin/gpt-6-1-sol", 1000000, 128000);
+assert.equal(l.ctx, 915390, "the list says 1M, 925k was refused"); assert.equal(l.refused, 925000);
+l = page.measuredLimits(codex, "gpt-6.1-terra", 872000, 128000);
+assert.equal(l.ctx, 920870, "a catalog value below what was accepted is raised to it");
+l = page.measuredLimits(claudeLogin, "claude-opus-5-5", 0, 0);
+assert.equal(l.ctx, 1000000); assert.equal(l.out, 128000); assert.equal(l.refused, 1000001);
+assert.equal(page.measuredLimits(claudeLogin, "claude-opus-5-5", 1000000, 128000).changed, false);
+assert.equal(page.measuredLimits(devin, "devin/gpt-6-astra", 1000000, 128000), null, "nothing measured: no opinion");
+
+// the limit fields
+assert.equal(page.parseTok("922k"), 922000); assert.equal(page.parseTok("1.05M"), 1050000); assert.equal(page.parseTok("128,000"), 128000);
+assert.equal(page.parseTok(" 1048576 "), 1048576); assert.equal(page.parseTok(""), 0);
+assert.ok(Number.isNaN(page.parseTok("lots"))); assert.ok(Number.isNaN(page.parseTok("-5k"))); assert.ok(Number.isNaN(page.parseTok("0")));
 
 console.log("page tests passed");
