@@ -791,13 +791,14 @@ const ttlSeconds = (t) => { const m = String(t).trim().match(/^(\d+(?:\.\d+)?)\s
 async function loadPublicCatalogs() {
   try {
     const cached = JSON.parse(localStorage.getItem(STORE_EXT) || "null");
-    if (cached && Date.now() - cached.at < EXT_TTL_MS) return indexExt(cached);
+    if (cached && Array.isArray(cached.obs) && Date.now() - cached.at < EXT_TTL_MS) return indexExt(cached);
   } catch (_) { /* refetch */ }
-  const [or, md] = await Promise.allSettled([
+  const [or, md, obs] = await Promise.allSettled([
     fetch("https://openrouter.ai/api/v1/models").then((r) => (r.ok ? r.json() : null)),
     fetch("https://models.dev/experimental/v2.0/api.json").then((r) => (r.ok ? r.json() : null)),
+    fetch(OBSERVED_URL).then((r) => (r.ok ? r.json() : null)),
   ]);
-  const ext = { at: Date.now(), or: {}, md: {} };
+  const ext = { at: Date.now(), or: {}, md: {}, obs: observedExtract(obs.status === "fulfilled" ? obs.value : null) };
   for (const m of (or.status === "fulfilled" && or.value && or.value.data) || []) {
     const c = Number(m.context_length) || 0, o = Number(m.top_provider && m.top_provider.max_completion_tokens) || 0;
     if (m.id && (c || o)) ext.or[lc(m.id)] = [c, o];
@@ -811,7 +812,7 @@ async function loadPublicCatalogs() {
       ext.md[lc(pid) + "\t" + lc(mid)] = [c, o, ttls.length ? Math.min(...ttls) : 0, cache.implicit ? 1 : 0];
     }
   }
-  if (!Object.keys(ext.or).length && !Object.keys(ext.md).length) return null;
+  if (!Object.keys(ext.or).length && !Object.keys(ext.md).length && !ext.obs.length) return null;
   try { localStorage.setItem(STORE_EXT, JSON.stringify(ext)); } catch (_) { /* too big or blocked: keep in memory */ }
   return indexExt(ext);
 }
@@ -823,7 +824,7 @@ function indexExt(ext) {
     if (!byKey.has(key)) byKey.set(key, []);
     byKey.get(key).push({ pid, mid, v });
   }
-  return { or: ext.or || {}, md: ext.md || {}, byKey };
+  return { or: ext.or || {}, md: ext.md || {}, byKey, obs: ext.obs || [] };
 }
 // CPA provider -> models.dev provider for the model's own vendor
 const MD_PROVIDER = { claude: "anthropic", codex: "openai", gemini: "google", "gemini-cli": "google", aistudio: "google",
@@ -854,11 +855,80 @@ function publicLimits(s, model) {
   const min = (a, b) => (a && b ? Math.min(a, b) : a || b);
   return { ctx: min(v[0], md && md.ctx), out: min(v[1], md && md.out), src: md ? "OpenRouter + models.dev" : "OpenRouter" };
 }
+// >>> measured-cache
+// Measured cache lifetimes: https://github.com/ngvoicu/cache-ttl-probe publishes observed.json, one entry per run
+// (route, model, warm checks per wait time). A member's level is suggested from a run on the same route and model
+// made through CPA; the documented lifetime (models.dev) is only the fallback, because resellers and subscription
+// routes often keep a cache for less time than the model's own vendor documents.
+const OBSERVED_URL = "https://raw.githubusercontent.com/ngvoicu/cache-ttl-probe/main/observed.json";
+const OBS_CLIENTS = { "pi+cliproxyapi": "pi through CPA", cliproxyapi: "plain requests through CPA", direct: "plain requests straight to the provider" };
+// Compact rows: [route, model key, client, date, run id, safe seconds, control (1 warm, 0 cold, -1 none), checks, retention, lacks]
+function observedExtract(doc) {
+  const out = [];
+  for (const e of (doc && Array.isArray(doc.cache) ? doc.cache : [])) {
+    if (!e || !e.latest || !OBS_CLIENTS[e.client] || !e.route || !e.model) continue;
+    const o = e.options || {};
+    if (o.ttl) continue; // the run asked for a longer cache than clients get by default
+    const control = e.control && e.control.total ? (e.control.warm ? 1 : 0) : -1;
+    const checks = (Array.isArray(e.checks) ? e.checks : []).map((c) => [String(c.age), Number(c.warm) || 0, Number(c.total) || 0]);
+    if (!checks.length && control !== 0) continue; // nothing was measured
+    out.push([String(e.route), mkey(e.model), e.client, String(e.date || ""), String(e.id || ""), Number(e.all_warm_through_s) || 0,
+      control, checks, String(o.prompt_cache_retention || ""), e.lacks ? 1 : 0]);
+  }
+  return out;
+}
+// The route name observed.json uses for a pool member, or "" when it has none.
+function observedRoute(s) {
+  if (s.kind === "auth") return { codex: "codex-subscription", devin: "devin", meta: "meta-subscription", antigravity: "antigravity" }[s.provider] || "";
+  if (isOpenRouter(s)) return "openrouter";
+  if (s.provider === "codex" && /api\.openai\.com/i.test(s.baseUrl || "")) return "openai-api";
+  return "";
+}
+// The cache retention CPA's config asks Meta for (a payload rule setting prompt_cache_retention), or "".
+function metaRetention() {
+  const payload = ((S.config || {}).requests || {}).payload || {};
+  for (const kind of ["override", "default"]) {
+    for (const rule of Array.isArray(payload[kind]) ? payload[kind] : []) {
+      const v = rule && rule.params && rule.params.prompt_cache_retention;
+      if (v && (Array.isArray(rule.models) ? rule.models : []).some((m) => m && (!m.protocol || lc(m.protocol) === "meta"))) return String(v);
+    }
+  }
+  return "";
+}
+const fmtWait = (sec) => (sec % 3600 === 0 ? `${sec / 3600} h` : `${+(sec / 60).toFixed(1)} min`);
+// The level a measurement supports for this member and model, or null. Runs through CPA win; for OpenRouter a run
+// straight to OpenRouter counts too. Runs made before CPA marked OpenRouter requests for caching are skipped.
+function measuredCache(s, model) {
+  const obs = S.ext && S.ext.obs, route = observedRoute(s);
+  if (!obs || !obs.length || !route) return null;
+  const key = mkey(model), retention = route === "meta-subscription" ? metaRetention() : "";
+  const order = route === "openrouter" ? ["pi+cliproxyapi", "cliproxyapi", "direct"] : ["pi+cliproxyapi", "cliproxyapi"];
+  let best = null;
+  for (const [r, k, client, date, id, safe, control, checks, ret, lacks] of obs) {
+    if (r !== route || k !== key || lacks || ret !== retention) continue;
+    const rank = order.indexOf(client);
+    if (rank < 0) continue;
+    if (!best || rank < best.rank || (rank === best.rank && date > best.date)) best = { rank, client, date, id, safe, control, checks };
+  }
+  if (!best) return null;
+  const warm = best.checks.reduce((n, c) => n + c[1], 0);
+  const level = best.control === 0 || !warm ? "none" : best.safe >= 7200 ? "2h" : best.safe >= 3600 ? "1h" : best.safe >= 1800 ? "30m" : best.safe >= 300 ? "5m" : "none";
+  const verdict = best.control === 0 ? "an immediate re-send was not served from the cache"
+    : !warm ? "no check found the cache"
+    : best.safe >= 300 ? `every check found the cache up to ${fmtWait(best.safe)}`
+    : "the cache was not reliable even at 5 minutes";
+  const counts = best.checks.map((c) => `${c[0]} ${c[1]}/${c[2]}`).join(", ");
+  return { level, src: "measured", id: best.id, date: best.date,
+    why: `Measured on ${best.date}, ${OBS_CLIENTS[best.client]}: ${verdict}${counts ? ` (warm checks per wait: ${counts})` : ""}. Run ${best.id} in github.com/ngvoicu/cache-ttl-probe.` };
+}
+// <<< measured-cache
 // A cache level suggestion for a member whose level isn't set. CPA marks requests for caching on OpenRouter entries
 // (router-for-me/CLIProxyAPI#7284), so those keep the model's documented lifetime. Other OpenAI-compatible entries get
 // no cache markers, so models that only cache on request (Claude) don't cache there; models that cache automatically
 // keep their lifetime. Suggestions count only once accepted.
 function cacheSuggestion(s, model) {
+  const measured = measuredCache(s, model);
+  if (measured) return measured;
   const e = mdEntry(s, model);
   if (!e) return null;
   const [, , ttl, implicit] = e.v;
@@ -1373,8 +1443,14 @@ function poolCard(p) {
           })));
     const nocache = c && c.level === "none";
     const sug = !c && !p.deleted ? cacheSuggestion(s, model) : null;
-    const sugEl = sug ? h("div", { class: "cache-sug", title: sug.why }, `suggested cache: ${cacheLabel(sug.level)}${s.provider === "openai-compatibility" && sug.level === "none" ? " (OpenAI-compatible)" : " (models.dev)"}`,
+    const sugEl = sug ? h("div", { class: "cache-sug", title: sug.why }, `suggested cache: ${cacheLabel(sug.level)}${sug.src === "measured" ? " (measured)" : s.provider === "openai-compatibility" && sug.level === "none" ? " (OpenAI-compatible)" : " (models.dev)"}`,
       h("button", { class: "btn ghost", onclick: () => { p.cache.set(s.ref, sug.level); render(); } }, "Use")) : null;
+    // A level set above what was measured on this route: pi would wait past the cache's end before warming.
+    const meas = c && !c.known && !p.deleted ? measuredCache(s, model) : null;
+    const overEl = meas && CACHE_RANK[c.level] > CACHE_RANK[meas.level]
+      ? h("div", { class: "cache-sug", title: meas.why }, `set to ${cacheLabel(c.level)}; measured: ${cacheLabel(meas.level)}`,
+          h("button", { class: "btn ghost", onclick: () => { p.cache.set(s.ref, meas.level); render(); } }, "Use"))
+      : null;
     const lim = st ? st.per.get(sid) : null;
     const limEl = !st ? null : lim
       ? h("span", { class: "lim" + (lim.src ? " ext" : ""), title: lim.src
@@ -1391,7 +1467,7 @@ function poolCard(p) {
         h("div", { class: "src" }, h("span", { class: "name", title: srcLabel(s) }, srcLabel(s) + (s.disabled ? " (disabled)" : "")), cacheEl)),
       h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut,
         title: direct ? `Remove from pool. ${s.label} serves ${p.name} under that exact name, so saving makes it stop: an API key drops it from its model list; an account keeps it only through extra-pool aliases, or gets it excluded.` : "Remove from pool" }, "✕"),
-      sugEl,
+      sugEl, overEl,
       nocache ? h("div", { class: "cache-warn" }, "Doesn't cache: every message served here pays the full price.",
         h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut }, "Leave out")) : null,
       lowWhy ? h("div", { class: "limit-warn", title: "CPA reports one member's limits for the whole pool. A conversation that lands here can hit these lower limits." }, lowWhy,

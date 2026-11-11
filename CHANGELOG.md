@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.8.0 — 2026-11-11
+
+- **Cache levels are suggested from measurements first.** The page now reads
+  [`observed.json`](https://github.com/ngvoicu/cache-ttl-probe/blob/main/observed.json), public measurements of how
+  long each route really keeps a prompt cache, and suggests a member's level from a run on the **same route and
+  model, made through CPA**. A documented lifetime from models.dev is only the fallback. Before, a Devin member
+  serving GPT-6 Astra was suggested OpenAI's 30 minutes; measured through Devin it is 5.
+- **A level set above the measured one is flagged**: `set to 30 min; measured: 5 min`, with one-click *Use*.
+  The tooltip shows the run: date, how it was measured, and the warm checks per wait time.
+- What counts: Codex, Devin, Meta and Antigravity logins, OpenRouter entries and OpenAI API keys. For Meta the run
+  must match the cache retention your config asks for; for OpenRouter, runs made before CPA marked requests for
+  caching are ignored and runs straight to OpenRouter count. A route measured as unreliable at 5 minutes is
+  suggested *no cache*. Nothing is applied by itself.
+
 ## 1.7.0 — 2026-11-10
 
 - **Cache-hit counts can survive restarts.** Set `stats-file` in the plugin's config and the counts are read at start

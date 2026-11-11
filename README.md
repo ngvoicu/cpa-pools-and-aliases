@@ -141,11 +141,21 @@ so it gets that member's cache; a conversation that moves to another member star
   OpenAI-compatible OpenRouter entry, which gets no cache markers). The member is highlighted, the review warns about
   it, *Leave out* removes it, and it doesn't rejoin automatically.
 
-Members without a level get a **suggestion** from models.dev with one-click *Use*. On OpenRouter entries CPA marks
-requests for caching (since router-for-me/CLIProxyAPI#7284), so they keep the model's documented lifetime. Other
-OpenAI-compatible entries get no cache markers, so models that only cache on request (Claude) are suggested *no cache*
-there, while models that cache automatically keep their documented lifetime.
-Suggestions count only once you accept them; routes through CPA can differ from the model's provider.
+Members without a level get a **suggestion** with one-click *Use*:
+
+1. **Measured, when there is a measurement.** [`observed.json`](https://github.com/ngvoicu/cache-ttl-probe/blob/main/observed.json)
+   holds public measurements of how long each route really keeps a cache. A run on the same route and model, made
+   through CPA, decides: the level at or below the longest wait at which every check still found the cache. Routes
+   covered: Codex, Devin, Meta and Antigravity logins, OpenRouter entries, OpenAI API keys. A vendor's documented
+   lifetime often doesn't hold on a reseller: GPT-6 Astra is documented at 30 minutes and measured at 5 through Devin.
+2. **Documented, otherwise** (models.dev). On OpenRouter entries CPA marks requests for caching (since
+   router-for-me/CLIProxyAPI#7284), so they keep the model's documented lifetime. Other OpenAI-compatible entries get
+   no cache markers, so models that only cache on request (Claude) are suggested *no cache* there, while models that
+   cache automatically keep their documented lifetime.
+
+A level you set **above** the measured one is flagged (`set to 30 min; measured: 5 min`) with *Use*; hover for the
+run behind it. Suggestions count only once you accept them. To add measurements for your own routes, see
+[cache-ttl-probe](https://github.com/ngvoicu/cache-ttl-probe).
 
 The levels are information for you: the plugin doesn't change any request.
 
