@@ -25,6 +25,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Test
         run: cargo test --release --locked
+      - name: Test the page logic
+        run: node scripts/test-page.mjs
       - name: Build
         run: cargo build --release --locked
 

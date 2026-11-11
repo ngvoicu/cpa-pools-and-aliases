@@ -25,6 +25,7 @@ build:
 
 test:
 	cargo test --release
+	node scripts/test-page.mjs
 
 install: build
 	@mkdir -p $(PLUGINS_DIR)
