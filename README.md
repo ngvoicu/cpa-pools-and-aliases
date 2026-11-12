@@ -139,8 +139,9 @@ so it gets that member's cache; a conversation that moves to another member star
   members differ it is the shortest, in red (`cache 5 min`); mixed pools work, clients that refresh caches (pi)
   just plan for the shortest. Hover for the range.
 - A pool gets a lifetime only when **every member has a level and caches**. With a member that doesn't cache, or a
-  level not set, it reads `cache none` in red. A client can't tell which member serves it, and with a
-  lifetime it would pay to keep a cache warm on a member that has none.
+  level not set, it reads `cache no cache` or `cache not set` in red: the same words as a member's level. A client
+  can't tell which member serves it, and with a lifetime it would pay to keep a cache warm on a member that has
+  none.
 - **No cache** marks a member whose conversations pay the full price on every message (for example Claude through an
   OpenAI-compatible OpenRouter entry, which gets no cache markers). The member is highlighted, the review warns about
   it, *Leave out* removes it, and it doesn't rejoin automatically.

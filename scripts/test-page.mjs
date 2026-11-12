@@ -170,10 +170,11 @@ for (const set of ["", "none", "30m"]) assert.deepEqual(page.cacheAdvice(set, nu
 const line = (levels) => page.cacheSummaryParts(levels).map((x) => (x.cls === "bad" ? "RED " : "") + x.text);
 assert.deepEqual(line(["1h", "1h"]), ["1 hour"]);
 assert.deepEqual(line(["2h", "30m", "30m"]), ["RED 30 min"], "mixed: the shortest, in red");
-assert.deepEqual(line(["5m", "none"]), ["RED none"], "a member that doesn't cache means the pool gets no lifetime");
-assert.deepEqual(line(["5m", ""]), ["RED none"]);
-assert.deepEqual(line(["none"]), ["RED none"]);
-assert.deepEqual(line(["", ""]), ["RED none"]);
+assert.deepEqual(line(["5m", "none"]), ["RED no cache"], "a member that doesn't cache means the pool gets no lifetime");
+assert.deepEqual(line(["none"]), ["RED no cache"]);
+assert.deepEqual(line(["5m", ""]), ["RED not set"], "the same words as a member's level");
+assert.deepEqual(line(["", ""]), ["RED not set"]);
+assert.deepEqual(line(["none", ""]), ["RED not set"], "a level is missing: that comes first");
 assert.match(page.cacheSummaryParts(["2h", "30m"])[0].title, /from 30 min to 2 hours/);
 assert.match(page.cacheSummaryParts(["2h", "30m", "none", "none", ""])[0].title, /^2 members don't cache; 1 member has no cache level set; 2 members cache 30 min – 2 hours\./);
 assert.match(page.cacheSummaryParts(["5m", "none"])[0].title, /^1 member doesn't cache; 1 member caches 5 min\./);

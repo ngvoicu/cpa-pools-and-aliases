@@ -5,7 +5,8 @@
 **One layout for every card: the same three labels, in the same order, on pools and on members.**
 
 - **Pool:** `cache 30 min` · `limits [872k] context [128k] output` · `hits 98% · 24 h`, as a small table under the
-  pool's name. The cache value is red when the members differ or the pool gets none.
+  pool's name. The cache value uses the same words as a member's level (`not set`, `no cache`, `5 min`, …) and is
+  red when the members differ or the pool gets no lifetime.
 - **Member:** model, account, then one line: `cache [30 min] ✓ measured` · `limits 915k / 128k` · `hits 98% · 24 h`.
 - **Suggestions sit next to the level** instead of on their own line: `✓ measured` when your level matches,
   `measured: 5 min` with *Use* when it differs (yellow when yours is above a measured or known value), `no data`

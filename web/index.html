@@ -983,9 +983,11 @@ function cacheAdvice(set, sug) {
   const firm = sug.src === "measured" || sug.src === "known";
   return { tone: firm && CACHE_RANK[set] > CACHE_RANK[sug.level] ? "warn" : "quiet", use: sug.level, text };
 }
-// The pool's cache line: what the pool gets, and nothing else. `levels` has one entry per member: "" (not set),
-// "none", or a level. A pool gets a lifetime only when every member has a level and caches, and then it is the
-// shortest one: a client can't tell which member serves it. Red when the members don't agree; the tooltip says how.
+// The pool's cache: what the pool gets, in the same words as a member's level ("not set", "no cache", "5 min", …).
+// `levels` has one entry per member: "" (not set), "none", or a level. A pool gets a lifetime only when every member
+// has a level and caches, and then it is the shortest one: a client can't tell which member serves it. A member with
+// no level makes the pool "not set"; otherwise one that doesn't cache makes it "no cache". Red when the members
+// don't agree; the tooltip says how.
 function cacheSummaryParts(levels) {
   const cached = levels.filter((v) => v && v !== "none"), none = levels.filter((v) => v === "none").length, unset = levels.filter((v) => !v).length;
   const sorted = [...new Set(cached)].sort((a, b) => CACHE_RANK[a] - CACHE_RANK[b]);
@@ -996,7 +998,7 @@ function cacheSummaryParts(levels) {
     if (none) why.push(count(none, "member doesn't cache", "members don't cache"));
     if (unset) why.push(count(unset, "member has no cache level set", "members have no cache level set"));
     if (cached.length) why.push(`${count(cached.length, "member caches", "members cache")} ${lo === hi ? cacheLabel(lo) : cacheLabel(lo) + " – " + cacheLabel(hi)}`);
-    return [{ cls: "bad", text: "none",
+    return [{ cls: "bad", text: unset ? "not set" : "no cache",
       title: `${why.join("; ")}. A pool gets a cache lifetime only when every member has a level and caches: a client can't tell which member serves it, and with a lifetime it would pay to keep a cache warm on a member that has none. So clients (pi) are told nothing and don't warm this pool's cache.` }];
   }
   if (lo !== hi) {
