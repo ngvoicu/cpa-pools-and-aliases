@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.2.0 — 2026-11-12
+## 2.2.0 — 2026-11-13
 
 **One layout for every card: the same three labels, in the same order, on pools and on members.**
 
