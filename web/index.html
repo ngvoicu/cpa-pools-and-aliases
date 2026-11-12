@@ -640,29 +640,9 @@ function cacheMap() {
   return out;
 }
 function cacheSummary(p, mem) {
-  const levels = [], unknown = [], none = [];
-  for (const sid of mem.keys()) {
-    const s = srcById(sid);
-    const c = cacheOf(p, s);
-    if (!c) unknown.push(s);
-    else if (c.level === "none") none.push(s);
-    else levels.push(c.level);
-  }
   if (!mem.size) return null;
-  const parts = [];
-  if (levels.length) {
-    const sorted = [...new Set(levels)].sort((a, b) => CACHE_RANK[a] - CACHE_RANK[b]);
-    const lo = sorted[0], hi = sorted[sorted.length - 1];
-    parts.push(lo === hi
-      ? h("span", { title: "Every member with a known level keeps the cache this long. With every level set, model lists report it so clients (pi) refresh caches on that schedule." }, `cache: ${cacheLabel(lo)}`)
-      : h("span", { class: "mixed", title: `Each conversation stays on one member and gets that member's cache. Clients that refresh caches can't tell which member serves them, so they plan for the shortest (${cacheLabel(lo)}): members with longer caches get refreshed more often than needed. Split them into an extra pool to give each its own lifetime.` },
-          `cache: ${cacheLabel(lo)} – ${cacheLabel(hi)} (mixed) · clients plan for ${cacheLabel(lo)}`));
-  }
-  if (none.length) parts.push(h("span", { class: "bad", title: "Conversations served by these members pay the full price on every message." },
-    `⚠ ${none.length} member${none.length === 1 ? " doesn't" : "s don't"} cache`));
-  if (unknown.length) parts.push(h("span", { class: "unk", title: "Set the cache level on each member below. Until every member has one, the pool reports no cache lifetime to clients." },
-    `${unknown.length} cache level${unknown.length === 1 ? "" : "s"} not set`));
-  return h("div", { class: "pool-cache" }, ...parts);
+  const parts = cacheSummaryParts([...mem.keys()].map((sid) => { const c = cacheOf(p, srcById(sid)); return c ? c.level : ""; }));
+  return h("div", { class: "pool-cache" }, ...parts.map((x) => h("span", { class: x.cls, title: x.title }, x.text)));
 }
 // Cache hit rates. CPA hands every finished request to the plugin, which counts, per pool and member, the prompt
 // tokens and how many of them were read from the cache (kept in the plugin's stats-file when one is set, else in
@@ -985,6 +965,28 @@ function cacheAdvice(set, sug) {
   const firm = sug.src === "measured" || sug.src === "known";
   if (firm && CACHE_RANK[set] > CACHE_RANK[sug.level]) return { tone: "warn", use: sug.level, text: `set to ${cacheLabel(set)}; ${sug.src}: ${cacheLabel(sug.level)}` };
   return { tone: "quiet", use: sug.level, text: `suggested cache: ${label} · set to ${cacheLabel(set)}` };
+}
+// The pool's cache line. `levels` has one entry per member: "" (not set), "none", or a level. The first part says
+// what clients are told, which is a lifetime only when every member has a level and caches: a client can't tell
+// which member serves it, and with a lifetime it would pay to keep a cache warm on a member that has none.
+function cacheSummaryParts(levels) {
+  const cached = levels.filter((v) => v && v !== "none"), none = levels.filter((v) => v === "none").length, unset = levels.filter((v) => !v).length;
+  const sorted = [...new Set(cached)].sort((a, b) => CACHE_RANK[a] - CACHE_RANK[b]);
+  const lo = sorted[0], hi = sorted[sorted.length - 1];
+  const range = lo === hi ? cacheLabel(lo) : `${cacheLabel(lo)} – ${cacheLabel(hi)}`;
+  if (!none && !unset) {
+    return [lo === hi
+      ? { cls: "", text: `cache: ${cacheLabel(lo)}`, title: "Every member keeps the cache this long. Model lists report it, so clients (pi) refresh caches on that schedule." }
+      : { cls: "mixed", text: `cache: ${range} (mixed) · clients plan for ${cacheLabel(lo)}`,
+          title: `Each conversation stays on one member and gets that member's cache. Clients that refresh caches can't tell which member serves them, so they plan for the shortest (${cacheLabel(lo)}): members with longer caches get refreshed more often than needed. Split them into an extra pool to give each its own lifetime.` }];
+  }
+  const parts = [{ cls: none ? "bad" : "unk", text: "cache: no lifetime reported to clients",
+    title: "A pool reports a cache lifetime only when every member has a level and caches. A client can't tell which member serves it: with a lifetime it would pay to keep a cache warm on a member that has none. So clients (pi) don't warm this pool's cache at all." }];
+  if (cached.length) parts.push({ cls: "", text: `${cached.length} member${cached.length === 1 ? " caches" : "s cache"} ${range}`,
+    title: "Conversations served by these members are cached, but clients aren't told for how long (see the first note). Move them to an extra pool to give them a reported lifetime." });
+  if (none) parts.push({ cls: "bad", text: `⚠ ${none} member${none === 1 ? " doesn't" : "s don't"} cache`, title: "Conversations served by these members pay the full price on every message." });
+  if (unset) parts.push({ cls: "unk", text: `${unset} cache level${unset === 1 ? "" : "s"} not set`, title: "Set the cache level on each member below." });
+  return parts;
 }
 // <<< measured-cache
 // A cache level suggestion for a member, shown whether or not its level is set. CPA marks requests for caching on OpenRouter entries

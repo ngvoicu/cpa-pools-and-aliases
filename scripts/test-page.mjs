@@ -14,7 +14,7 @@ const source = [
   pick(/^const cacheLabel = .*$/m, "cacheLabel"),
   pick(/^const isOpenRouter = .*$/m, "isOpenRouter"),
   pick(/\/\/ >>> measured-cache[\s\S]*?\/\/ <<< measured-cache/, "measured-cache block"),
-  "return { observedExtract, observedRoute, measuredCache, metaRetention, knownExtract, knownCacheFor, limitsExtract, measuredLimits, parseTok, levelForSeconds, cacheAdvice, setState: (v) => { S = v; } };",
+  "return { observedExtract, observedRoute, measuredCache, metaRetention, knownExtract, knownCacheFor, limitsExtract, measuredLimits, parseTok, levelForSeconds, cacheAdvice, cacheSummaryParts, setState: (v) => { S = v; } };",
 ].join("\n");
 const page = new Function("let S = {};\n" + source)();
 
@@ -171,5 +171,17 @@ for (const set of ["", "none", "30m"]) {
   a = page.cacheAdvice(set, null);
   assert.equal(a.tone, "quiet"); assert.equal(a.use, ""); assert.match(a.text, /^no suggestion/);
 }
+
+// the pool's cache line leads with what clients are told
+const line = (levels) => page.cacheSummaryParts(levels).map((x) => x.text);
+assert.deepEqual(line(["1h", "1h"]), ["cache: 1 hour"]);
+assert.deepEqual(line(["2h", "30m", "30m"]), ["cache: 30 min – 2 hours (mixed) · clients plan for 30 min"]);
+assert.deepEqual(line(["5m", "none"]), ["cache: no lifetime reported to clients", "1 member caches 5 min", "⚠ 1 member doesn't cache"],
+  "a member that doesn't cache means no lifetime is reported: the line must not read 'cache: 5 min'");
+assert.deepEqual(line(["5m", ""]), ["cache: no lifetime reported to clients", "1 member caches 5 min", "1 cache level not set"]);
+assert.deepEqual(line(["none"]), ["cache: no lifetime reported to clients", "⚠ 1 member doesn't cache"]);
+assert.deepEqual(line(["2h", "30m", "none", "none", ""]), ["cache: no lifetime reported to clients", "2 members cache 30 min – 2 hours", "⚠ 2 members don't cache", "1 cache level not set"]);
+assert.deepEqual(line(["", ""]), ["cache: no lifetime reported to clients", "2 cache levels not set"]);
+assert.equal(page.cacheSummaryParts(["5m", "none"])[0].cls, "bad"); assert.equal(page.cacheSummaryParts(["5m", ""])[0].cls, "unk");
 
 console.log("page tests passed");

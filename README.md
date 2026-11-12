@@ -137,6 +137,10 @@ so it gets that member's cache; a conversation that moves to another member star
   reported, the review lists them (`as before; now stored like every other level`), and the next save stores them.
 - The pool summary shows the shortest and longest level. Mixed pools work; clients that refresh caches (pi) just have
   to plan for the shortest.
+- A pool reports a lifetime to clients only when **every member has a level and caches**. With a member that
+  doesn't cache, or a level not set, the summary reads `cache: no lifetime reported to clients` followed by what
+  the members do (`1 member caches 5 min · ⚠ 1 member doesn't cache`). A client can't tell which member serves it,
+  and with a lifetime it would pay to keep a cache warm on a member that has none.
 - **No cache** marks a member whose conversations pay the full price on every message (for example Claude through an
   OpenAI-compatible OpenRouter entry, which gets no cache markers). The member is highlighted, the review warns about
   it, *Leave out* removes it, and it doesn't rejoin automatically.

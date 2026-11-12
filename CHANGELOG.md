@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.1 — 2026-11-12
+
+- **The pool's cache line says what clients are told.** A pool with a 5-minute member and a member that doesn't cache
+  read `cache: 5 min · ⚠ 1 member doesn't cache`, as if the pool reported 5 minutes. It reports no lifetime in that
+  case (and when a level isn't set), so the line now reads `cache: no lifetime reported to clients · 1 member caches
+  5 min · ⚠ 1 member doesn't cache`. What is reported did not change.
+
 ## 2.1.0 — 2026-11-11
 
 - **Every member shows its suggestion, set or not.** Under each member there is now always one line:
