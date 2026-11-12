@@ -153,48 +153,40 @@ m = page.measuredCache(meta, "muse-ember-1.0");
 assert.equal(m.level, "2h", "4 hours safe is the longest level, not 'no cache'"); assert.match(m.why, /up to 4 h/);
 state();
 
-// the line under every member: shown whether or not a level is set
+// next to every member's cache level: where the suggestion comes from, and its value when it differs
 let a = page.cacheAdvice("", { level: "30m", src: "measured" });
-assert.deepEqual(a, { tone: "warn", use: "30m", text: "suggested cache: 30 min (measured)" }, "not set: suggest, with Use");
-a = page.cacheAdvice("30m", { level: "30m", src: "measured" });
-assert.equal(a.tone, "quiet"); assert.equal(a.use, "", "nothing to change"); assert.match(a.text, /30 min \(measured\) · same as set/);
-a = page.cacheAdvice("30m", { level: "5m", src: "measured" });
-assert.deepEqual(a, { tone: "warn", use: "5m", text: "set to 30 min; measured: 5 min" }, "set above a measurement: flagged");
+assert.deepEqual(a, { tone: "warn", use: "30m", text: "measured: 30 min" }, "not set: suggest, with Use");
+assert.deepEqual(page.cacheAdvice("30m", { level: "30m", src: "measured" }), { tone: "quiet", use: "", text: "✓ measured" }, "same as set: nothing to change");
+assert.deepEqual(page.cacheAdvice("30m", { level: "5m", src: "measured" }), { tone: "warn", use: "5m", text: "measured: 5 min" }, "set above a measurement: flagged");
 a = page.cacheAdvice("1h", { level: "none", src: "known" });
-assert.equal(a.tone, "warn"); assert.equal(a.use, "none");
+assert.equal(a.tone, "warn"); assert.equal(a.use, "none"); assert.equal(a.text, "known: no cache");
 a = page.cacheAdvice("5m", { level: "2h", src: "measured" });
-assert.equal(a.tone, "quiet", "set below a measurement is the owner's cautious choice"); assert.equal(a.use, "2h");
-assert.match(a.text, /suggested cache: 2 hours \(measured\) · set to 5 min/);
+assert.equal(a.tone, "quiet", "set below a measurement is the owner's cautious choice"); assert.equal(a.use, "2h"); assert.equal(a.text, "measured: 2 hours");
 a = page.cacheAdvice("1h", { level: "5m", src: "models.dev" });
 assert.equal(a.tone, "quiet", "a documented value is not firm enough to flag"); assert.equal(a.use, "5m");
-for (const set of ["", "none", "30m"]) {
-  a = page.cacheAdvice(set, null);
-  assert.equal(a.tone, "quiet"); assert.equal(a.use, ""); assert.match(a.text, /^no suggestion/);
-}
+for (const set of ["", "none", "30m"]) assert.deepEqual(page.cacheAdvice(set, null), { tone: "quiet", use: "", text: "no data" });
 
-// the pool's cache line: what the pool gets, red when the members don't agree
+// the pool's cache: what the pool gets, red when the members don't agree
 const line = (levels) => page.cacheSummaryParts(levels).map((x) => (x.cls === "bad" ? "RED " : "") + x.text);
-assert.deepEqual(line(["1h", "1h"]), ["cache: 1 hour"]);
-assert.deepEqual(line(["2h", "30m", "30m"]), ["RED cache: 30 min"], "mixed: the shortest, in red");
-assert.deepEqual(line(["5m", "none"]), ["RED cache: none"], "a member that doesn't cache means the pool gets no lifetime");
-assert.deepEqual(line(["5m", ""]), ["RED cache: none"]);
-assert.deepEqual(line(["none"]), ["RED cache: none"]);
-assert.deepEqual(line(["", ""]), ["RED cache: none"]);
+assert.deepEqual(line(["1h", "1h"]), ["1 hour"]);
+assert.deepEqual(line(["2h", "30m", "30m"]), ["RED 30 min"], "mixed: the shortest, in red");
+assert.deepEqual(line(["5m", "none"]), ["RED none"], "a member that doesn't cache means the pool gets no lifetime");
+assert.deepEqual(line(["5m", ""]), ["RED none"]);
+assert.deepEqual(line(["none"]), ["RED none"]);
+assert.deepEqual(line(["", ""]), ["RED none"]);
 assert.match(page.cacheSummaryParts(["2h", "30m"])[0].title, /from 30 min to 2 hours/);
 assert.match(page.cacheSummaryParts(["2h", "30m", "none", "none", ""])[0].title, /^2 members don't cache; 1 member has no cache level set; 2 members cache 30 min – 2 hours\./);
 assert.match(page.cacheSummaryParts(["5m", "none"])[0].title, /^1 member doesn't cache; 1 member caches 5 min\./);
 
-// cache hits: every member gets a line of the same shape, and a rate only when it can say something
+// cache hits: the same value on pools and members, and a rate only when it can say something
 const hits = new Function([pick(/^const HITS_LOW = .*$/m, "HITS_LOW"), pick(/\/\/ >>> hits[\s\S]*?\/\/ <<< hits/, "hits block"), "return { hitsRate, hitsLabel };"].join("\n"))();
 const counts = (requests, failed, prompt, read) => ({ requests, failed, prompt, read, write: 0 });
-assert.deepEqual(hits.hitsLabel(counts(166, 0, 7600000, 7450000), "24 h"), { text: "hits 98% · 24 h", low: false, why: "" });
-assert.equal(hits.hitsLabel(counts(181, 0, 5000000, 4950000), "1 h").text, "hits 99% · 1 h", "the window is always shown");
-assert.deepEqual(hits.hitsLabel(counts(40, 0, 900000, 90000), "24 h"), { text: "hits 10% · 24 h", low: true, why: "" });
-assert.deepEqual(hits.hitsLabel(counts(6, 0, 858, 0), "24 h"), { text: "hits – · tiny prompts · 24 h", low: false, why: "small" },
-  "six test pings must not read as a 0% cache");
-assert.deepEqual(hits.hitsLabel(counts(4, 4, 0, 0), "24 h"), { text: "hits – · 4 failed · 24 h", low: false, why: "failed" });
-assert.deepEqual(hits.hitsLabel(counts(0, 0, 0, 0), "24 h"), { text: "hits – · no requests · 24 h", low: false, why: "none" });
-assert.equal(hits.hitsLabel(counts(0, 0, 0, 0), "since 23:12").text, "hits – · no requests · since 23:12");
+assert.deepEqual(hits.hitsLabel(counts(166, 0, 7600000, 7450000), "24 h"), { text: "98% · 24 h", low: false, why: "" });
+assert.equal(hits.hitsLabel(counts(181, 0, 5000000, 4950000), "1 h").text, "99% · 1 h", "the window is always shown");
+assert.deepEqual(hits.hitsLabel(counts(40, 0, 900000, 90000), "24 h"), { text: "10% · 24 h", low: true, why: "" });
+assert.deepEqual(hits.hitsLabel(counts(6, 0, 858, 0), "24 h"), { text: "–", low: false, why: "small" }, "six test pings must not read as a 0% cache");
+assert.deepEqual(hits.hitsLabel(counts(4, 4, 0, 0), "24 h"), { text: "– · 4 failed", low: true, why: "failed" });
+assert.deepEqual(hits.hitsLabel(counts(0, 0, 0, 0), "24 h"), { text: "–", low: false, why: "none" });
 assert.equal(hits.hitsRate(counts(10, 2, 400000, 200000)).rate, 50, "failed requests don't count toward the average size");
 assert.equal(hits.hitsRate(counts(3, 0, 40000, 0)).rate, 0, "a real 0% on cacheable prompts is still shown");
 

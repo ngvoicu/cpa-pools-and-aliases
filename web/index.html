@@ -98,32 +98,34 @@ input:focus, select:focus { border-color: var(--accent); }
 .member .cache { white-space: nowrap; }
 .member .cache select { font-size: 11px; padding: 0 4px; margin-left: 2px; background: transparent; color: inherit; border: 1px solid var(--border2); border-radius: 4px; }
 .member .cache-warn { grid-column: 2 / 4; font-size: 12px; color: var(--danger); display: flex; align-items: center; gap: 8px; }
-.pool-cache { margin: 4px 0 0 6px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.pool-cache .bad { color: var(--danger); }
-.pool-cache .unk { color: var(--danger); }
-.pool-cache .mixed { color: var(--warn); }
+/* A pool's facts and a member's facts use the same three labels in the same order: cache, limits, hits. */
+.facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 10px; margin: 8px 0 10px 6px; font-size: 12px; align-items: baseline; }
+.facts .k, .mfacts .k { color: var(--faint); }
+.facts .v { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; color: var(--text); }
+.facts .bad, .facts .unk { color: var(--danger); }
+.facts .low { color: var(--warn); }
+.facts .fill { grid-column: 2; }
+.mfacts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; margin-top: 3px; font-size: 12px; color: var(--muted); }
+.mfacts .f { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.mfacts .sug { color: var(--faint); }
+.mfacts .sug.warn { color: var(--warn); }
+.mfacts .btn.ghost { padding: 0 5px; font-size: 12px; }
 .member .lim.unknown { color: var(--danger); }
-.pool-hits { margin: 4px 0 0 6px; font-size: 12px; color: var(--muted); }
-.pool-hits:empty, .member .hits:empty { display: none; }
-.member .hits { white-space: nowrap; color: var(--muted); font: 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
 .pool-hits.low, .member .hits.low { color: var(--warn); }
-.member .hits.idle { color: var(--faint); }
-.member .lim.ext { text-decoration: underline dotted; text-underline-offset: 3px; }
-.member .cache-sug { grid-column: 2 / 4; font-size: 12px; color: var(--warn); display: flex; align-items: center; gap: 8px; }
-.member .cache-sug.quiet { color: var(--faint); }
+.pool-hits.idle, .member .hits.idle { color: var(--faint); }
 .member .cache select.unset { color: var(--danger); border-color: rgba(240,91,91,.6); }
 .member .cache.unset { color: var(--danger); }
 .pool-prefix { font-family: var(--mono); font-size: 12px; width: 92px; padding: 2px 6px; background: transparent; color: var(--muted);
   border: 1px dashed var(--border2); border-radius: 6px; }
 .pool-prefix.changed { outline: 2px solid var(--warn); outline-offset: -1px; color: inherit; }
-.pool-cache .lowl { color: var(--warn); }
-.pool-cache .hint { color: var(--muted); }
-.pool-cache .lim-in { width: 62px; padding: 1px 5px; font: inherit; color: var(--text); background: transparent; border: 1px solid var(--border2); border-radius: 5px; }
-.pool-cache .lim-in.unset { border-color: var(--danger); }
-.pool-cache .lim-in.changed { border-color: var(--warn); }
-.pool-cache .btn.ghost { padding: 0 6px; font-size: 12px; }
+.facts .lowl { color: var(--warn); }
+.facts .hint { color: var(--faint); }
+.facts .lim-in { width: 62px; padding: 1px 5px; font: inherit; color: var(--text); background: transparent; border: 1px solid var(--border2); border-radius: 5px; }
+.facts .lim-in.unset { border-color: var(--danger); }
+.facts .lim-in.changed { border-color: var(--warn); }
+.facts .btn.ghost { padding: 0 6px; font-size: 12px; }
 .member.lowlimit { border-color: rgba(245,165,36,.55); }
-.member .lim { white-space: nowrap; color: var(--muted); font: 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+.member .lim, .member .hits { color: var(--text); }
 .member .limit-warn { grid-column: 2 / 4; font-size: 12px; color: var(--warn); display: flex; align-items: center; gap: 8px; }
 
 .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); display: flex; flex-direction: column; overflow: hidden; }
@@ -642,7 +644,7 @@ function cacheMap() {
 function cacheSummary(p, mem) {
   if (!mem.size) return null;
   const parts = cacheSummaryParts([...mem.keys()].map((sid) => { const c = cacheOf(p, srcById(sid)); return c ? c.level : ""; }));
-  return h("div", { class: "pool-cache" }, ...parts.map((x) => h("span", { class: x.cls, title: x.title }, x.text)));
+  return parts.map((x) => h("span", { class: x.cls, title: x.title }, x.text));
 }
 // Cache hit rates. CPA hands every finished request to the plugin, which counts, per pool and member, the prompt
 // tokens and how many of them were read from the cache (kept in the plugin's stats-file when one is set, else in
@@ -691,21 +693,15 @@ function hitsRate(c) {
   return { rate: Math.round((100 * c.read) / c.prompt), why: "" };
 }
 const pct = (c) => hitsRate(c).rate;
-// Every member shows the same shape, "hits <rate> · <window or reason>", so a missing rate is explained instead
-// of leaving the row empty. `win` is the short window label: "1 h", "24 h" or "since 23:12".
+// The value after the "hits" label, the same on a pool and on a member: "98% · 24 h", or "–" when there is no rate
+// (the tooltip says why). Failures are worth seeing, so they stay in the text. `win` is "1 h", "24 h" or "since 23:12".
 function hitsLabel(c, win) {
   const { rate, why } = hitsRate(c);
-  if (why === "none") return { text: `hits – · no requests · ${win}`, low: false, why };
-  if (why === "failed") return { text: `hits – · ${c.failed} failed · ${win}`, low: false, why };
-  if (why === "small") return { text: `hits – · tiny prompts · ${win}`, low: false, why };
-  return { text: `hits ${rate}% · ${win}`, low: rate < HITS_LOW * 100, why };
+  if (why === "failed") return { text: `– · ${c.failed} failed`, low: true, why };
+  if (why) return { text: "–", low: false, why };
+  return { text: `${rate}% · ${win}`, low: rate < HITS_LOW * 100, why };
 }
 // <<< hits
-function hitText(c) {
-  const { rate, why } = hitsRate(c);
-  const n = `${c.requests} request${c.requests === 1 ? "" : "s"}`;
-  return `${rate === null ? "–" : rate + "%"} (${n}${why === "small" ? ", too small to judge" : why === "failed" ? ", all failed" : ""})`;
-}
 function hitTitle(c, when) {
   const why = hitsRate(c).why;
   return `${when}: ${c.requests} request${c.requests === 1 ? "" : "s"}${c.failed ? `, ${c.failed} failed` : ""}. ` +
@@ -743,29 +739,23 @@ function fillHits() {
     : !file ? " Kept in memory only: they start again when CPA restarts (set stats-file in the plugin's config to keep them)."
     : file.error ? ` Not saved: ${file.error}.`
     : ` Kept across restarts in ${file.path}.`;
+  const fill = (el, x, extra = "") => {
+    el.className = el.classList.contains("pool-hits") ? "pool-hits" : "hits"; el.textContent = "–"; el.title = "";
+    if (!S || !S.hits) { el.classList.add("idle"); el.title = "This plugin library doesn't count cache hits."; return; }
+    const [c, when, short] = pick(x || { hour: noCounts(), day: noCounts() }, w);
+    const label = hitsLabel(c, short);
+    el.textContent = label.text + extra;
+    el.classList.toggle("low", label.low);
+    el.classList.toggle("idle", label.text === "–");
+    el.title = hitTitle(c, when) + (el.classList.contains("pool-hits") ? ` Counted since ${since}.` + kept : "");
+  };
   for (const el of document.querySelectorAll(".pool-hits[data-pool]")) {
     const ph = poolHits(el.dataset.pool);
-    el.replaceChildren(); el.className = "pool-hits"; el.title = "";
-    if (!S || !S.hits) continue;
-    if (!ph || !ph.total.day.requests) { el.textContent = `cache hits: no requests since ${since}`; continue; }
-    const [c, when] = pick(ph.total, w);
-    const low = pct(c) !== null && pct(c) < HITS_LOW * 100;
-    el.textContent = "cache hits: " + (ph.total.hour.requests && !w.one ? `${w.hour} ${hitText(ph.total.hour)} · ` : "") + `${w.day} ${hitText(ph.total.day)}`;
-    if (file && file.error) el.textContent += " · counts not saved";
-    el.classList.toggle("low", low);
-    el.title = hitTitle(c, when) + ` Counted since ${since}.` + kept;
+    fill(el, ph && ph.total, file && file.error ? " · counts not saved" : "");
   }
   for (const el of document.querySelectorAll(".member .hits[data-pool]")) {
     const ph = poolHits(el.dataset.pool);
-    const x = ph && ph.bySid.get(el.dataset.sid);
-    el.textContent = ""; el.title = ""; el.className = "hits";
-    if (!S || !S.hits) continue; // no counts at all (an older plugin library): nothing to say
-    const [c, when, short] = pick(x || { hour: noCounts(), day: noCounts() }, w);
-    const label = hitsLabel(c, short);
-    el.textContent = label.text;
-    el.classList.toggle("low", label.low);
-    el.classList.toggle("idle", label.why !== "");
-    el.title = hitTitle(c, when);
+    fill(el, ph && ph.bySid.get(el.dataset.sid));
   }
 }
 
@@ -981,18 +971,17 @@ function measuredCache(s, model) {
   return { level, src: "measured", id: best.id, date: best.date,
     why: `Measured on ${best.date}, ${OBS_CLIENTS[best.client]}: ${verdict}${counts ? ` (warm checks per wait: ${counts})` : ""}. Run ${best.id} in github.com/ngvoicu/cache-ttl-probe.` };
 }
-// What to show under a member about its cache level: always a line, whether or not a level is set.
-// `set` is the member's level ("" when not set); `sug` a suggestion ({ level, src }) or null.
+// What a member shows next to its cache level, always: where a suggestion comes from and, when it differs from the
+// level set, its value. `set` is the member's level ("" when not set); `sug` a suggestion ({ level, src }) or null.
 //   tone "warn": needs a look (no level yet, or set above what was measured or is known); "quiet": for information.
 //   use: the level a "Use" button would set, or "" for no button.
 function cacheAdvice(set, sug) {
-  if (!sug) return { tone: "quiet", use: "", text: "no suggestion: not measured or documented for this model here" };
-  const label = `${cacheLabel(sug.level)} (${sug.src})`;
-  if (!set) return { tone: "warn", use: sug.level, text: `suggested cache: ${label}` };
-  if (set === sug.level) return { tone: "quiet", use: "", text: `suggested cache: ${label} · same as set` };
+  if (!sug) return { tone: "quiet", use: "", text: "no data" };
+  if (set === sug.level) return { tone: "quiet", use: "", text: `✓ ${sug.src}` };
+  const text = `${sug.src}: ${cacheLabel(sug.level)}`;
+  if (!set) return { tone: "warn", use: sug.level, text };
   const firm = sug.src === "measured" || sug.src === "known";
-  if (firm && CACHE_RANK[set] > CACHE_RANK[sug.level]) return { tone: "warn", use: sug.level, text: `set to ${cacheLabel(set)}; ${sug.src}: ${cacheLabel(sug.level)}` };
-  return { tone: "quiet", use: sug.level, text: `suggested cache: ${label} · set to ${cacheLabel(set)}` };
+  return { tone: firm && CACHE_RANK[set] > CACHE_RANK[sug.level] ? "warn" : "quiet", use: sug.level, text };
 }
 // The pool's cache line: what the pool gets, and nothing else. `levels` has one entry per member: "" (not set),
 // "none", or a level. A pool gets a lifetime only when every member has a level and caches, and then it is the
@@ -1007,14 +996,14 @@ function cacheSummaryParts(levels) {
     if (none) why.push(count(none, "member doesn't cache", "members don't cache"));
     if (unset) why.push(count(unset, "member has no cache level set", "members have no cache level set"));
     if (cached.length) why.push(`${count(cached.length, "member caches", "members cache")} ${lo === hi ? cacheLabel(lo) : cacheLabel(lo) + " – " + cacheLabel(hi)}`);
-    return [{ cls: "bad", text: "cache: none",
+    return [{ cls: "bad", text: "none",
       title: `${why.join("; ")}. A pool gets a cache lifetime only when every member has a level and caches: a client can't tell which member serves it, and with a lifetime it would pay to keep a cache warm on a member that has none. So clients (pi) are told nothing and don't warm this pool's cache.` }];
   }
   if (lo !== hi) {
-    return [{ cls: "bad", text: `cache: ${cacheLabel(lo)}`,
+    return [{ cls: "bad", text: cacheLabel(lo),
       title: `Mixed: members keep the cache from ${cacheLabel(lo)} to ${cacheLabel(hi)}. Each conversation stays on one member and gets that member's cache, but a client can't tell which one serves it, so the pool gets the shortest (${cacheLabel(lo)}): members with longer caches are refreshed more often than needed. Split them into an extra pool to give each its own lifetime.` }];
   }
-  return [{ cls: "", text: `cache: ${cacheLabel(lo)}`, title: "Every member keeps the cache this long. Model lists report it, so clients (pi) refresh caches on that schedule." }];
+  return [{ cls: "", text: cacheLabel(lo), title: "Every member keeps the cache this long. Model lists report it, so clients (pi) refresh caches on that schedule." }];
 }
 // <<< measured-cache
 // A cache level suggestion for a member, shown whether or not its level is set. CPA marks requests for caching on OpenRouter entries
@@ -1082,7 +1071,7 @@ function limitSummary(p, st, mem) {
       if (Number.isNaN(n)) { toast("Use a number of tokens, e.g. 922k, 1M or 128000.", true); render(); return; }
       set[k] = n; render();
     } });
-  const parts = [h("span", { class: "lim-edit" }, "clients see: ", field("context", "Context window"), " context · ", field("output", "Output limit"), " output")];
+  const parts = [h("span", { class: "lim-edit" }, field("context", "Context window"), " context  ", field("output", "Output limit"), " output")];
   const refusedBy = [...st.per.entries()].filter(([, l]) => l.refused && set.context >= l.refused).map(([sid]) => srcById(sid)).filter(Boolean);
   const differs = (k) => sug[k] > 0 && set[k] !== sug[k];
   if (differs("context") || differs("output")) {
@@ -1092,12 +1081,12 @@ function limitSummary(p, st, mem) {
         title: (refusedBy.length ? `Measured: ${refusedBy.map((x) => x.label).join(", ")} refused an input this large. ` : "") +
           "The suggestion is the smallest value among the members: every member can handle a request that fits it. Member values come from a measurement when there is one, else from CPA's catalog, else from OpenRouter's list and models.dev." +
           (mixed ? " The members differ; hover a member for its own limits." : "") },
-      `${!set.context && !set.output ? "not set · " : ""}suggested: ${text}${mixed ? " (smallest; members differ)" : ""}`,
+      `suggested: ${text}`,
       h("button", { class: "btn ghost", disabled: p.deleted, onclick: () => { if (sug.context) set.context = sug.context; if (sug.output) set.output = sug.output; render(); } }, "Use")));
   }
   if (st.unknown.length) parts.push(h("span", { class: "unk", title: "No source has limits for this model on these members (e.g. OpenAI-compatible providers), so the suggestion ignores them. max-context-length on the model in CPA's config sets its window." },
-    `${st.unknown.length} limit${st.unknown.length === 1 ? "" : "s"} unknown`));
-  return h("div", { class: "pool-cache" }, ...parts);
+    `${st.unknown.length} unknown`));
+  return parts;
 }
 // What clients are told about each pool: the context window and output limit set on the pool, and the cache
 // lifetime when every member has a level and caches (the shortest wins). Stored in plugins.configs.<id>.limits;
@@ -1550,15 +1539,20 @@ function poolCard(p) {
     h("span", {}, `${mem.size} source${mem.size === 1 ? "" : "s"}`),
     p.legacy ? h("span", { class: "hint" }, `(was ${p.legacy})`) : null, sw));
   const st = !p.deleted && !p.error ? limitStats(mem) : null;
-  if (st) {
-    const cs = cacheSummary(p, mem); if (cs) card.append(cs);
-    const ls = limitSummary(p, st, mem); if (ls) card.append(ls);
-    const fill = poolSuggestions(p, mem, st);
-    if (fill.length && !p.deleted) card.append(h("div", { class: "pool-cache" },
+  // The pool's facts: what clients are told (cache, limits) and how the cache did (hits). Members repeat the labels.
+  if (!p.deleted) {
+    const facts = h("div", { class: "facts" });
+    const row = (label, title, ...value) => facts.append(h("span", { class: "k", title }, label), h("span", { class: "v" }, ...value));
+    const cs = st ? cacheSummary(p, mem) : null, ls = st ? limitSummary(p, st, mem) : null;
+    if (cs) row("cache", "The cache lifetime clients are told for this pool.", ...cs);
+    if (ls) row("limits", "The context window and output limit clients are told for this pool.", ...ls);
+    row("hits", "How much of the prompt was read from the cache, across the pool.", h("span", { class: "pool-hits", "data-pool": lc(p.name) }, "–"));
+    const fill = st ? poolSuggestions(p, mem, st) : [];
+    if (fill.length) facts.append(h("span", { class: "fill" },
       h("button", { class: "btn ghost", title: "Fill in what isn't set yet with the suggested values:\n" + fill.map((f) => "• " + f.text).join("\n") + "\nNothing you set is changed.",
         onclick: () => { for (const f of fill) f.apply(); render(); } }, `Use suggestions (${fill.length})`)));
+    card.append(facts);
   }
-  if (!p.deleted) card.append(h("div", { class: "pool-hits", "data-pool": lc(p.name) }));
 
   const list = h("div", { class: "members" });
   if (!mem.size) list.append(h("div", { class: "empty-members" }, "No account or key serves this model yet. Drop one here or add it below."));
@@ -1569,8 +1563,7 @@ function poolCard(p) {
     const isNew = !direct && (p.origMembers.get(sid) !== model || (p.origName && p.name !== p.origName));
     const c = cacheOf(p, s);
     const leaveOut = () => { p.members.delete(sid); p.auto.delete(sid); p.skip.add(s.ref); render(); };
-    const cacheEl = h("span", { class: "cache" + (c ? "" : " unset"), title: c ? "How long this member keeps the prompt cache for this model. Your choice: used for the pool summary, warnings and the lifetime reported to clients." : "Cache level not set: the pool reports no cache lifetime to clients until every member has one." },
-          "cache",
+    const cacheEl = h("span", { class: "cache" + (c ? "" : " unset"), title: c ? "How long this member keeps the prompt cache for this model. Your choice: used for the pool's cache, warnings and the lifetime reported to clients." : "Cache level not set: the pool reports no cache lifetime to clients until every member has one." },
           h("select", { class: c ? "" : "unset", disabled: p.deleted, onclick: (ev) => ev.stopPropagation(), onchange: (ev) => {
             if (ev.target.value) p.cache.set(s.ref, ev.target.value); else p.cache.delete(s.ref);
             render();
@@ -1582,28 +1575,30 @@ function poolCard(p) {
     // from how CPA builds the request, stands out: pi would wait past the cache's end before warming.
     const sug = p.deleted ? null : cacheSuggestion(s, model);
     const adv = p.deleted ? null : cacheAdvice(c ? c.level : "", sug);
-    const sugEl = adv ? h("div", { class: "cache-sug" + (adv.tone === "quiet" ? " quiet" : ""),
-        title: sug ? sug.why : "No measurement in observed.json for this route and model, nothing known from how CPA builds the request, and no lifetime in models.dev. Pick a level yourself; to measure it, see github.com/ngvoicu/cache-ttl-probe." },
+    const sugEl = adv ? h("span", { class: "sug" + (adv.tone === "warn" ? " warn" : ""),
+        title: sug ? `Suggested: ${cacheLabel(sug.level)}. ${sug.why}` : "No suggestion: no measurement in observed.json for this route and model, nothing known from how CPA builds the request, and no lifetime in models.dev. Pick a level yourself; to measure it, see github.com/ngvoicu/cache-ttl-probe." },
       adv.text,
       adv.use ? h("button", { class: "btn ghost", onclick: () => { p.cache.set(s.ref, adv.use); render(); } }, "Use") : null) : null;
     const lim = st ? st.per.get(sid) : null;
     const limEl = !st ? null : lim
-      ? h("span", { class: "lim" + (lim.src ? " ext" : ""), title: lim.src
-            ? `Context window / output limit from ${lim.src === "models.dev" ? "models.dev" : lim.src === "OpenRouter" ? "OpenRouter's model list" : "OpenRouter's model list and models.dev (the smaller of each)"}: CPA has no data for this member. Counted for the pool's limits.`
-            : `Context window / output limit${lim.cfg ? " (window from max-context-length in CPA's config)" : ""}, from CPA's model catalog.` },
-          `${lim.ctx ? fmtTok(lim.ctx) : "?"} / ${lim.out ? fmtTok(lim.out) : "?"}${lim.meas ? " · measured" : lim.src ? " · " + lim.src : ""}`)
-      : h("span", { class: "lim unknown", title: "CPA has no catalog entry for this model on this provider, so the pool's limits ignore it and requests here may hit a smaller window. max-context-length on the model in CPA's config sets its window." }, "limits unknown");
+      ? h("span", { class: "lim", title: (lim.meas ? "Context window / output limit; the window was measured (observed.json). "
+            : lim.src ? `Context window / output limit from ${lim.src === "models.dev" ? "models.dev" : lim.src === "OpenRouter" ? "OpenRouter's model list" : "OpenRouter's model list and models.dev (the smaller of each)"}: CPA has no data for this member. `
+            : `Context window / output limit${lim.cfg ? " (window from max-context-length in CPA's config)" : ""}, from CPA's model catalog. `) + "Counted for the pool's suggested limits." },
+          `${lim.ctx ? fmtTok(lim.ctx) : "?"} / ${lim.out ? fmtTok(lim.out) : "?"}`)
+      : h("span", { class: "lim unknown", title: "CPA has no catalog entry for this model on this provider, so the pool's limits ignore it and requests here may hit a smaller window. max-context-length on the model in CPA's config sets its window." }, "?");
     const lowWhy = limitWarning(st, sid);
     list.append(h("div", { class: "member" + (isNew ? " new" : "") + (nocache ? " nocache" : lowWhy ? " lowlimit" : ""), title: srcLabel(s) },
       h("i", { class: "dot", style: `background:${prov(s.provider).color}` }),
       h("div", { style: "min-width:0" },
-        h("div", { class: "model" }, h("span", { class: "name", title: model }, model), limEl,
-          h("span", { class: "hits", "data-pool": lc(p.name), "data-sid": sid })),
-        h("div", { class: "src" }, h("span", { class: "name", title: srcLabel(s) }, srcLabel(s) + (s.disabled ? " (disabled)" : "")), cacheEl)),
+        h("div", { class: "model" }, h("span", { class: "name", title: model }, model)),
+        h("div", { class: "src" }, h("span", { class: "name", title: srcLabel(s) }, srcLabel(s) + (s.disabled ? " (disabled)" : ""))),
+        h("div", { class: "mfacts" },
+          h("span", { class: "f" }, h("span", { class: "k" }, "cache"), cacheEl, sugEl),
+          limEl ? h("span", { class: "f" }, h("span", { class: "k" }, "limits"), limEl) : null,
+          p.deleted ? null : h("span", { class: "f" }, h("span", { class: "k" }, "hits"), h("span", { class: "hits", "data-pool": lc(p.name), "data-sid": sid }, "–")))),
       h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut,
         title: direct ? `Remove from pool. ${s.label} serves ${p.name} under that exact name, so saving makes it stop: an API key drops it from its model list; an account keeps it only through extra-pool aliases, or gets it excluded.` : "Remove from pool" }, "✕"),
-      sugEl,
-      nocache ? h("div", { class: "cache-warn" }, "Doesn't cache: every message served here pays the full price.",
+      nocache ? h("div", { class: "cache-warn" }, "No cache: every message served here pays the full price.",
         h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut }, "Leave out")) : null,
       lowWhy ? h("div", { class: "limit-warn", title: "CPA reports one member's limits for the whole pool. A conversation that lands here can hit these lower limits." }, lowWhy,
         nocache ? null : h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut }, "Leave out")) : null));
