@@ -88,7 +88,6 @@ input:focus, select:focus { border-color: var(--accent); }
 .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
 .badge { font-size: 10px; border: 1px solid var(--border2); border-radius: 4px; padding: 0 5px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 .badge.key { color: var(--warn); border-color: rgba(245,165,36,.4); }
-.badge.direct { color: var(--accent); border-color: rgba(52,211,153,.4); }
 .pool-model { display: flex; align-items: center; gap: 8px; margin: 2px 0 0 6px; font-size: 12px; color: var(--muted); }
 .pool-model code { font-family: var(--mono); font-size: 12px; color: var(--text); white-space: nowrap; }
 .pool-model .hint { white-space: nowrap; }
@@ -995,27 +994,27 @@ function cacheAdvice(set, sug) {
   if (firm && CACHE_RANK[set] > CACHE_RANK[sug.level]) return { tone: "warn", use: sug.level, text: `set to ${cacheLabel(set)}; ${sug.src}: ${cacheLabel(sug.level)}` };
   return { tone: "quiet", use: sug.level, text: `suggested cache: ${label} · set to ${cacheLabel(set)}` };
 }
-// The pool's cache line. `levels` has one entry per member: "" (not set), "none", or a level. The first part says
-// what clients are told, which is a lifetime only when every member has a level and caches: a client can't tell
-// which member serves it, and with a lifetime it would pay to keep a cache warm on a member that has none.
+// The pool's cache line: what the pool gets, and nothing else. `levels` has one entry per member: "" (not set),
+// "none", or a level. A pool gets a lifetime only when every member has a level and caches, and then it is the
+// shortest one: a client can't tell which member serves it. Red when the members don't agree; the tooltip says how.
 function cacheSummaryParts(levels) {
   const cached = levels.filter((v) => v && v !== "none"), none = levels.filter((v) => v === "none").length, unset = levels.filter((v) => !v).length;
   const sorted = [...new Set(cached)].sort((a, b) => CACHE_RANK[a] - CACHE_RANK[b]);
   const lo = sorted[0], hi = sorted[sorted.length - 1];
-  const range = lo === hi ? cacheLabel(lo) : `${cacheLabel(lo)} – ${cacheLabel(hi)}`;
-  if (!none && !unset) {
-    return [lo === hi
-      ? { cls: "", text: `cache: ${cacheLabel(lo)}`, title: "Every member keeps the cache this long. Model lists report it, so clients (pi) refresh caches on that schedule." }
-      : { cls: "mixed", text: `cache: ${range} (mixed) · clients plan for ${cacheLabel(lo)}`,
-          title: `Each conversation stays on one member and gets that member's cache. Clients that refresh caches can't tell which member serves them, so they plan for the shortest (${cacheLabel(lo)}): members with longer caches get refreshed more often than needed. Split them into an extra pool to give each its own lifetime.` }];
+  const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  if (none || unset) {
+    const why = [];
+    if (none) why.push(count(none, "member doesn't cache", "members don't cache"));
+    if (unset) why.push(count(unset, "member has no cache level set", "members have no cache level set"));
+    if (cached.length) why.push(`${count(cached.length, "member caches", "members cache")} ${lo === hi ? cacheLabel(lo) : cacheLabel(lo) + " – " + cacheLabel(hi)}`);
+    return [{ cls: "bad", text: "cache: none",
+      title: `${why.join("; ")}. A pool gets a cache lifetime only when every member has a level and caches: a client can't tell which member serves it, and with a lifetime it would pay to keep a cache warm on a member that has none. So clients (pi) are told nothing and don't warm this pool's cache.` }];
   }
-  const parts = [{ cls: none ? "bad" : "unk", text: "cache: no lifetime reported to clients",
-    title: "A pool reports a cache lifetime only when every member has a level and caches. A client can't tell which member serves it: with a lifetime it would pay to keep a cache warm on a member that has none. So clients (pi) don't warm this pool's cache at all." }];
-  if (cached.length) parts.push({ cls: "", text: `${cached.length} member${cached.length === 1 ? " caches" : "s cache"} ${range}`,
-    title: "Conversations served by these members are cached, but clients aren't told for how long (see the first note). Move them to an extra pool to give them a reported lifetime." });
-  if (none) parts.push({ cls: "bad", text: `⚠ ${none} member${none === 1 ? " doesn't" : "s don't"} cache`, title: "Conversations served by these members pay the full price on every message." });
-  if (unset) parts.push({ cls: "unk", text: `${unset} cache level${unset === 1 ? "" : "s"} not set`, title: "Set the cache level on each member below." });
-  return parts;
+  if (lo !== hi) {
+    return [{ cls: "bad", text: `cache: ${cacheLabel(lo)}`,
+      title: `Mixed: members keep the cache from ${cacheLabel(lo)} to ${cacheLabel(hi)}. Each conversation stays on one member and gets that member's cache, but a client can't tell which one serves it, so the pool gets the shortest (${cacheLabel(lo)}): members with longer caches are refreshed more often than needed. Split them into an extra pool to give each its own lifetime.` }];
+  }
+  return [{ cls: "", text: `cache: ${cacheLabel(lo)}`, title: "Every member keeps the cache this long. Model lists report it, so clients (pi) refresh caches on that schedule." }];
 }
 // <<< measured-cache
 // A cache level suggestion for a member, shown whether or not its level is set. CPA marks requests for caching on OpenRouter entries
@@ -1229,11 +1228,11 @@ function plan() {
       dirty = true;
       if (b && !a && !isDirect(p, b)) removedModels.push(b);
       if (b && !a && isDirect(p, b)) { changes.push({ t: "del", text: `− ${p.name} ← ${b}  (stops serving it directly)`, where }); continue; }
-      if (!b && a && isDirect(p, a)) { changes.push({ t: "add", text: `+ ${p.name} ← ${a}  (direct)`, where }); continue; }
+      if (!b && a && isDirect(p, a)) { changes.push({ t: "add", text: `+ ${p.name} ← ${a}`, where }); continue; }
       if (!b && !needsWrite) changes.push({ t: "mod", text: `~ ${p.name}: drop old name “${[...old].find((n) => (s.entries || []).some((e) => lc(e["display-name"]) === n)) || ""}”`, where });
       else if (!b) changes.push({ t: "add", text: `+ ${p.name} ← ${a}${p.auto.has(s.id) ? "  (new source)" : ""}`, where });
       else if (!a) changes.push({ t: "del", text: `− ${p.origName} ← ${b}`, where });
-      else if (b !== a || renamed) changes.push({ t: "mod", text: `~ ${p.origName}${renamed ? " ⇒ " + p.name : ""}: ${b}${b !== a ? " → " + a : ""}${isDirect(p, a) ? "  (direct)" : ""}`, where });
+      else if (b !== a || renamed) changes.push({ t: "mod", text: `~ ${p.origName}${renamed ? " ⇒ " + p.name : ""}: ${b}${b !== a ? " → " + a : ""}`, where });
       else changes.push({ t: "mod", text: `~ ${p.name}: drop old name`, where });
     }
     if (!dirty) continue;
@@ -1352,7 +1351,7 @@ function plan() {
     if (!p.limits.context && !p.limits.output) notes.push(`${p.name}: no context window or output limit set, so clients see whatever CPA reports for it.`);
   }
   const dropped = changes.filter((c) => c.text.includes("(stops serving it directly)"));
-  if (dropped.length) notes.push("Left-out direct members stop serving the model under its own name: an API key drops it from its model list, " +
+  if (dropped.length) notes.push("Left-out members that serve the model under its own name stop doing so: an API key drops it from its model list, " +
     "an account keeps it only through its extra-pool aliases, or gets it excluded. Add them back here to undo.");
   const seeChanged = S.poolsOnly !== S.origPoolsOnly;
   if (seeChanged) {
@@ -1598,7 +1597,7 @@ function poolCard(p) {
     list.append(h("div", { class: "member" + (isNew ? " new" : "") + (nocache ? " nocache" : lowWhy ? " lowlimit" : ""), title: srcLabel(s) },
       h("i", { class: "dot", style: `background:${prov(s.provider).color}` }),
       h("div", { style: "min-width:0" },
-        h("div", { class: "model" }, h("span", { class: "name", title: model }, model), direct ? h("span", { class: "badge direct" }, "direct") : null, limEl,
+        h("div", { class: "model" }, h("span", { class: "name", title: model }, model), limEl,
           h("span", { class: "hits", "data-pool": lc(p.name), "data-sid": sid })),
         h("div", { class: "src" }, h("span", { class: "name", title: srcLabel(s) }, srcLabel(s) + (s.disabled ? " (disabled)" : "")), cacheEl)),
       h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut,
