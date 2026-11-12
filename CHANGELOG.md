@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.3 — 2026-11-12
+
+- **The pool's cache line is one value: what the pool gets.** `cache: 1 hour` when the members agree; the shortest
+  level in red when they differ (`cache: 5 min`); `cache: none` in red when a member doesn't cache or has no level
+  set. The details (the range, how many members, why) moved to the tooltip. This replaces the longer wording of
+  2.1.1 and `… (mixed) · clients plan for …`.
+- **The `direct` badge is gone**, from members and from the review's change list. Removing a member that serves
+  the model under its own name still explains what happens, in the ✕ tooltip and the review note.
+
 ## 2.1.2 — 2026-11-12
 
 - **Every member shows its cache hits, in the same shape.** Members without requests showed nothing and others

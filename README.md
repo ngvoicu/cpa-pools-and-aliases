@@ -59,14 +59,14 @@ The full story, with screenshots: **[Pools for CLIProxyAPI](https://ngvoicu.dev/
   `gpt-6.1-sol` land in the same pool. Dropping a different model on a pool is refused.
 - **New accounts join on their own.** Add an account or key, open the page, and it is already in the pools for its
   models, ready to save. Remove a member and it stays out. Extra pools keep the members you pick.
-- **Remove any member.** Members that serve the exact id (*direct*) can be removed too: an API key drops the model
+- **Remove any member.** Members that serve the exact id can be removed too: an API key drops the model
   from its list, an account keeps it only through its extra-pool aliases, or gets it excluded. *+ Add* undoes it.
 - **Clean model lists.** In every list CPA serves (OpenAI, Claude, Gemini and Codex-style clients such as pi) a pool
   shows as its plain id, never as `Claude Opus 5.5 (Devin)`.
 - **Pools only.** One switch hides every model that isn't in a pool from model lists. Requests by name still work.
 - **Switch to…** moves a whole pool to a new model version in one save.
-- **Cache levels.** Each member shows how long it keeps the prompt cache, and each pool shows a summary such as
-  "cache: 5 min – 1 hour (mixed)". Members that don't cache are flagged and can be left out with one click.
+- **Cache levels.** Each member shows how long it keeps the prompt cache, and each pool shows the one
+  lifetime it gets (red when its members differ). Members that don't cache are flagged and can be left out with one click.
 - **Limits.** Each member shows its context window and output limit, each pool the smallest of them. Members with
   lower limits than the rest are flagged and can be left out with one click.
 - **Consistent limits for clients.** Model lists report each pool's smallest limits, and its cache lifetime when every
@@ -103,7 +103,7 @@ Your tools don't change: they keep asking for `claude-opus-5-5`, and CPA now spr
 
 ## How it works
 
-Members that already serve the exact model id are in the model's main pool automatically (shown as *direct*); the
+Members that already serve the exact model id are in the model's main pool automatically; the
 others get an alias `<their model> → <pool id>`. Extra pools (`<name>/<model>`) are aliases only. The plugin itself
 renders the page and rewrites pool entries in model lists (plain display name, limits, cache lifetime).
 
@@ -135,12 +135,12 @@ so it gets that member's cache; a conversation that moves to another member star
 - Before 2.0 the levels of Claude members were a rule inside the plugin (logins 1 hour, API keys 5 minutes) and were
   never stored. On upgrade nothing changes for clients: each Claude member starts with the lifetime its pool already
   reported, the review lists them (`as before; now stored like every other level`), and the next save stores them.
-- The pool summary shows the shortest and longest level. Mixed pools work; clients that refresh caches (pi) just have
-  to plan for the shortest.
-- A pool reports a lifetime to clients only when **every member has a level and caches**. With a member that
-  doesn't cache, or a level not set, the summary reads `cache: no lifetime reported to clients` followed by what
-  the members do (`1 member caches 5 min · ⚠ 1 member doesn't cache`). A client can't tell which member serves it,
-  and with a lifetime it would pay to keep a cache warm on a member that has none.
+- The pool's line shows the one lifetime the pool gets, which is what clients are told: `cache: 1 hour`. When the
+  members differ it is the shortest, in red (`cache: 5 min`); mixed pools work, clients that refresh caches (pi)
+  just plan for the shortest. Hover for the range.
+- A pool gets a lifetime only when **every member has a level and caches**. With a member that doesn't cache, or a
+  level not set, the line reads `cache: none` in red. A client can't tell which member serves it, and with a
+  lifetime it would pay to keep a cache warm on a member that has none.
 - **No cache** marks a member whose conversations pay the full price on every message (for example Claude through an
   OpenAI-compatible OpenRouter entry, which gets no cache markers). The member is highlighted, the review warns about
   it, *Leave out* removes it, and it doesn't rejoin automatically.
@@ -240,7 +240,7 @@ pool line says "counts not saved" and the tooltip gives the reason.
 
 - **API keys without a model list** serve every default model of their provider. Adding a pool member writes those
   defaults into the list so the key keeps serving them; the review tells you.
-- **Removing a direct member** makes that account or key stop serving the model under its own name (it is the pool's
+- **Removing a member that serves the exact model id** makes that account or key stop serving the model under its own name (it is the pool's
   id). An account that is also in an extra pool keeps serving it there. Deleting or switching a pool never hides
   anything.
 - **Prompt caches belong to accounts.** A request that moves to another member starts cold; turn on CPA's session

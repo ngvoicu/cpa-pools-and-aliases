@@ -172,17 +172,17 @@ for (const set of ["", "none", "30m"]) {
   assert.equal(a.tone, "quiet"); assert.equal(a.use, ""); assert.match(a.text, /^no suggestion/);
 }
 
-// the pool's cache line leads with what clients are told
-const line = (levels) => page.cacheSummaryParts(levels).map((x) => x.text);
+// the pool's cache line: what the pool gets, red when the members don't agree
+const line = (levels) => page.cacheSummaryParts(levels).map((x) => (x.cls === "bad" ? "RED " : "") + x.text);
 assert.deepEqual(line(["1h", "1h"]), ["cache: 1 hour"]);
-assert.deepEqual(line(["2h", "30m", "30m"]), ["cache: 30 min – 2 hours (mixed) · clients plan for 30 min"]);
-assert.deepEqual(line(["5m", "none"]), ["cache: no lifetime reported to clients", "1 member caches 5 min", "⚠ 1 member doesn't cache"],
-  "a member that doesn't cache means no lifetime is reported: the line must not read 'cache: 5 min'");
-assert.deepEqual(line(["5m", ""]), ["cache: no lifetime reported to clients", "1 member caches 5 min", "1 cache level not set"]);
-assert.deepEqual(line(["none"]), ["cache: no lifetime reported to clients", "⚠ 1 member doesn't cache"]);
-assert.deepEqual(line(["2h", "30m", "none", "none", ""]), ["cache: no lifetime reported to clients", "2 members cache 30 min – 2 hours", "⚠ 2 members don't cache", "1 cache level not set"]);
-assert.deepEqual(line(["", ""]), ["cache: no lifetime reported to clients", "2 cache levels not set"]);
-assert.equal(page.cacheSummaryParts(["5m", "none"])[0].cls, "bad"); assert.equal(page.cacheSummaryParts(["5m", ""])[0].cls, "unk");
+assert.deepEqual(line(["2h", "30m", "30m"]), ["RED cache: 30 min"], "mixed: the shortest, in red");
+assert.deepEqual(line(["5m", "none"]), ["RED cache: none"], "a member that doesn't cache means the pool gets no lifetime");
+assert.deepEqual(line(["5m", ""]), ["RED cache: none"]);
+assert.deepEqual(line(["none"]), ["RED cache: none"]);
+assert.deepEqual(line(["", ""]), ["RED cache: none"]);
+assert.match(page.cacheSummaryParts(["2h", "30m"])[0].title, /from 30 min to 2 hours/);
+assert.match(page.cacheSummaryParts(["2h", "30m", "none", "none", ""])[0].title, /^2 members don't cache; 1 member has no cache level set; 2 members cache 30 min – 2 hours\./);
+assert.match(page.cacheSummaryParts(["5m", "none"])[0].title, /^1 member doesn't cache; 1 member caches 5 min\./);
 
 // cache hits: every member gets a line of the same shape, and a rate only when it can say something
 const hits = new Function([pick(/^const HITS_LOW = .*$/m, "HITS_LOW"), pick(/\/\/ >>> hits[\s\S]*?\/\/ <<< hits/, "hits block"), "return { hitsRate, hitsLabel };"].join("\n"))();
