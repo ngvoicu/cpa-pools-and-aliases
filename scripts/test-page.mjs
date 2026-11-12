@@ -10,10 +10,11 @@ const source = [
   pick(/^const lc = .*$/m, "lc"),
   pick(/^const mkey = .*$/m, "mkey"),
   pick(/^const CACHE_LEVELS = .*$/m, "CACHE_LEVELS"),
+  pick(/^const CACHE_RANK = .*$/m, "CACHE_RANK"),
   pick(/^const cacheLabel = .*$/m, "cacheLabel"),
   pick(/^const isOpenRouter = .*$/m, "isOpenRouter"),
   pick(/\/\/ >>> measured-cache[\s\S]*?\/\/ <<< measured-cache/, "measured-cache block"),
-  "return { observedExtract, observedRoute, measuredCache, metaRetention, knownExtract, knownCacheFor, limitsExtract, measuredLimits, parseTok, levelForSeconds, setState: (v) => { S = v; } };",
+  "return { observedExtract, observedRoute, measuredCache, metaRetention, knownExtract, knownCacheFor, limitsExtract, measuredLimits, parseTok, levelForSeconds, cacheAdvice, setState: (v) => { S = v; } };",
 ].join("\n");
 const page = new Function("let S = {};\n" + source)();
 
@@ -145,5 +146,30 @@ assert.equal(page.measuredLimits(devin, "devin/gpt-6-astra", 1000000, 128000), n
 assert.equal(page.parseTok("922k"), 922000); assert.equal(page.parseTok("1.05M"), 1050000); assert.equal(page.parseTok("128,000"), 128000);
 assert.equal(page.parseTok(" 1048576 "), 1048576); assert.equal(page.parseTok(""), 0);
 assert.ok(Number.isNaN(page.parseTok("lots"))); assert.ok(Number.isNaN(page.parseTok("-5k"))); assert.ok(Number.isNaN(page.parseTok("0")));
+
+// a run that continues an earlier one: the file's safe value decides, even if a reader sees only cold checks
+page.setState({ ext: { obs: page.observedExtract({ cache: [run("m/M1", "meta-subscription", "pi+cliproxyapi", "muse-ember-1.0", [["8h", 0, 3], ["24h", 0, 3]], { safe: 14400 })] }), known: [], lim: [] }, config: {} });
+m = page.measuredCache(meta, "muse-ember-1.0");
+assert.equal(m.level, "2h", "4 hours safe is the longest level, not 'no cache'"); assert.match(m.why, /up to 4 h/);
+state();
+
+// the line under every member: shown whether or not a level is set
+let a = page.cacheAdvice("", { level: "30m", src: "measured" });
+assert.deepEqual(a, { tone: "warn", use: "30m", text: "suggested cache: 30 min (measured)" }, "not set: suggest, with Use");
+a = page.cacheAdvice("30m", { level: "30m", src: "measured" });
+assert.equal(a.tone, "quiet"); assert.equal(a.use, "", "nothing to change"); assert.match(a.text, /30 min \(measured\) · same as set/);
+a = page.cacheAdvice("30m", { level: "5m", src: "measured" });
+assert.deepEqual(a, { tone: "warn", use: "5m", text: "set to 30 min; measured: 5 min" }, "set above a measurement: flagged");
+a = page.cacheAdvice("1h", { level: "none", src: "known" });
+assert.equal(a.tone, "warn"); assert.equal(a.use, "none");
+a = page.cacheAdvice("5m", { level: "2h", src: "measured" });
+assert.equal(a.tone, "quiet", "set below a measurement is the owner's cautious choice"); assert.equal(a.use, "2h");
+assert.match(a.text, /suggested cache: 2 hours \(measured\) · set to 5 min/);
+a = page.cacheAdvice("1h", { level: "5m", src: "models.dev" });
+assert.equal(a.tone, "quiet", "a documented value is not firm enough to flag"); assert.equal(a.use, "5m");
+for (const set of ["", "none", "30m"]) {
+  a = page.cacheAdvice(set, null);
+  assert.equal(a.tone, "quiet"); assert.equal(a.use, ""); assert.match(a.text, /^no suggestion/);
+}
 
 console.log("page tests passed");
