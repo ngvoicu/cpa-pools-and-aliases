@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.2 — 2026-11-12
+
+- **Every member shows its cache hits, in the same shape.** Members without requests showed nothing and others
+  showed `hits 99%` or `hits 99% · 24 h`. Now each reads `hits <rate> · <window>`, and a missing rate says why:
+  `hits – · no requests · 24 h`, `hits – · 4 failed · 24 h`.
+- **Test pings no longer read as a 0% cache.** When a member's prompts average under 1,024 tokens (below what most
+  providers cache at all), the page shows `hits – · tiny prompts` instead of a warning-coloured `0%`, and the
+  pool's line says `too small to judge`. A real 0% on larger prompts is still shown and flagged.
+
 ## 2.1.1 — 2026-11-12
 
 - **The pool's cache line says what clients are told.** A pool with a 5-minute member and a member that doesn't cache

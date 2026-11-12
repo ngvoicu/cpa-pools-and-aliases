@@ -209,6 +209,10 @@ shows the **last hour** (or the last day when the last hour had none) on every m
 refreshes them every minute. Until a window is complete it is labelled by its start (`since 23:12`) instead of "last
 hour" or "last 24 h". The tooltip has the requests, failures and tokens read and written.
 
+Every member has the line, in one shape: `hits 98% · 24 h`. When there is no rate it says why: `no requests`,
+`3 failed`, or `tiny prompts` when the prompts average under 1,024 tokens, which is below what most providers cache
+at all (test pings would otherwise read as a 0% cache). A real 0% on larger prompts is shown and flagged.
+
 **Keeping the counts across restarts.** By default the counts live in memory and start again when CPA or the plugin
 restarts. To keep them, name a file in the plugin's config:
 
