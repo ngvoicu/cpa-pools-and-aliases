@@ -141,8 +141,11 @@ so it gets that member's cache; a conversation that moves to another member star
   OpenAI-compatible OpenRouter entry, which gets no cache markers). The member is highlighted, the review warns about
   it, *Leave out* removes it, and it doesn't rejoin automatically.
 
-Members without a level get a **suggestion** with one-click *Use* (and *Use suggestions* fills everything a pool
-hasn't set yet). In this order:
+Every member shows what the sources **suggest**, whether or not its level is set: `suggested cache: 30 min (measured)`
+with one-click *Use* when there is no level yet, `… · same as set` when yours matches, `… · set to 5 min` with *Use*
+when it differs, and `no suggestion: not measured or documented for this model here` when no source has anything.
+*Use suggestions* fills everything a pool hasn't set yet and never changes a level you set. The suggestion comes
+from, in this order:
 
 1. **Measured, when there is a measurement.** [`observed.json`](https://github.com/ngvoicu/cache-ttl-probe/blob/main/observed.json)
    holds public measurements of how long each route really keeps a cache. A run on the same route and model, made
@@ -158,7 +161,8 @@ hasn't set yet). In this order:
    cache automatically keep their documented lifetime.
 
 A level you set **above** the measured or known one is flagged (`set to 30 min; measured: 5 min`) with *Use*; hover
-for the run or the reason behind it. Suggestions count only once you accept them. To add measurements for your own routes, see
+for the run or the reason behind it. Suggestions count only once you accept them. The public data is kept in the
+browser for an hour, so a new measurement shows up the same day. To add measurements for your own routes, see
 [cache-ttl-probe](https://github.com/ngvoicu/cache-ttl-probe).
 
 The levels are information for you: the plugin doesn't change any request.

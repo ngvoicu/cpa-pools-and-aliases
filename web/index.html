@@ -110,6 +110,7 @@ input:focus, select:focus { border-color: var(--accent); }
 .pool-hits.low, .member .hits.low { color: var(--warn); }
 .member .lim.ext { text-decoration: underline dotted; text-underline-offset: 3px; }
 .member .cache-sug { grid-column: 2 / 4; font-size: 12px; color: var(--warn); display: flex; align-items: center; gap: 8px; }
+.member .cache-sug.quiet { color: var(--faint); }
 .member .cache select.unset { color: var(--danger); border-color: rgba(240,91,91,.6); }
 .member .cache.unset { color: var(--danger); }
 .pool-prefix { font-family: var(--mono); font-size: 12px; width: 92px; padding: 2px 6px; background: transparent; color: var(--muted);
@@ -771,9 +772,9 @@ const fmtTok = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(2)}M` : n >= 1000 ? `${M
 // ------------------------------------------------------------------ public catalogs
 // Fallbacks for members CPA has no data for: OpenRouter's model list (for OpenRouter entries) and models.dev v2
 // (limits and cache capabilities of every provider's models). Fetched in the background, kept as a compact extract
-// in localStorage for a day; the page never waits for them.
-const STORE_EXT = PLUGIN_ID + ":public-catalogs";
-const EXT_TTL_MS = 24 * 60 * 60 * 1000;
+// in localStorage for an hour (a new measurement should show up the same day); the page never waits for them.
+const STORE_EXT = PLUGIN_ID + ":public-catalogs-2";
+const EXT_TTL_MS = 60 * 60 * 1000;
 const ttlSeconds = (t) => { const m = String(t).trim().match(/^(\d+(?:\.\d+)?)\s*([smhd])$/i); return m ? Number(m[1]) * { s: 1, m: 60, h: 3600, d: 86400 }[m[2].toLowerCase()] : 0; };
 async function loadPublicCatalogs() {
   try {
@@ -961,17 +962,32 @@ function measuredCache(s, model) {
   }
   if (!best) return null;
   const warm = best.checks.reduce((n, c) => n + c[1], 0);
-  const level = best.control === 0 || !warm ? "none" : levelForSeconds(best.safe);
+  // The file's safe value decides. "Never cached" needs both: no safe value and no warm check listed.
+  const never = !warm && best.safe < 300;
+  const level = best.control === 0 || never ? "none" : levelForSeconds(best.safe);
   const verdict = best.control === 0 ? "an immediate re-send was not served from the cache"
-    : !warm ? "no check found the cache"
+    : never ? "no check found the cache"
     : best.safe >= 300 ? `every check found the cache up to ${fmtWait(best.safe)}`
     : "the cache was not reliable even at 5 minutes";
   const counts = best.checks.map((c) => `${c[0]} ${c[1]}/${c[2]}`).join(", ");
   return { level, src: "measured", id: best.id, date: best.date,
     why: `Measured on ${best.date}, ${OBS_CLIENTS[best.client]}: ${verdict}${counts ? ` (warm checks per wait: ${counts})` : ""}. Run ${best.id} in github.com/ngvoicu/cache-ttl-probe.` };
 }
+// What to show under a member about its cache level: always a line, whether or not a level is set.
+// `set` is the member's level ("" when not set); `sug` a suggestion ({ level, src }) or null.
+//   tone "warn": needs a look (no level yet, or set above what was measured or is known); "quiet": for information.
+//   use: the level a "Use" button would set, or "" for no button.
+function cacheAdvice(set, sug) {
+  if (!sug) return { tone: "quiet", use: "", text: "no suggestion: not measured or documented for this model here" };
+  const label = `${cacheLabel(sug.level)} (${sug.src})`;
+  if (!set) return { tone: "warn", use: sug.level, text: `suggested cache: ${label}` };
+  if (set === sug.level) return { tone: "quiet", use: "", text: `suggested cache: ${label} · same as set` };
+  const firm = sug.src === "measured" || sug.src === "known";
+  if (firm && CACHE_RANK[set] > CACHE_RANK[sug.level]) return { tone: "warn", use: sug.level, text: `set to ${cacheLabel(set)}; ${sug.src}: ${cacheLabel(sug.level)}` };
+  return { tone: "quiet", use: sug.level, text: `suggested cache: ${label} · set to ${cacheLabel(set)}` };
+}
 // <<< measured-cache
-// A cache level suggestion for a member whose level isn't set. CPA marks requests for caching on OpenRouter entries
+// A cache level suggestion for a member, shown whether or not its level is set. CPA marks requests for caching on OpenRouter entries
 // (router-for-me/CLIProxyAPI#7284), so those keep the model's documented lifetime. Other OpenAI-compatible entries get
 // no cache markers, so models that only cache on request (Claude) don't cache there; models that cache automatically
 // keep their lifetime. Suggestions count only once accepted.
@@ -1532,16 +1548,14 @@ function poolCard(p) {
             const o = h("option", { value: v }, label); if (c && c.level === v) o.selected = true; return o;
           })));
     const nocache = c && c.level === "none";
-    const sug = !c && !p.deleted ? cacheSuggestion(s, model) : null;
-    const sugEl = sug ? h("div", { class: "cache-sug", title: sug.why }, `suggested cache: ${cacheLabel(sug.level)} (${sug.src})`,
-      h("button", { class: "btn ghost", onclick: () => { p.cache.set(s.ref, sug.level); render(); } }, "Use")) : null;
-    // A level set above what was measured, or what follows from how CPA builds the request: pi would wait past
-    // the cache's end before warming.
-    const firm = c && !p.deleted ? (measuredCache(s, model) || knownCacheFor(s, model)) : null;
-    const overEl = firm && CACHE_RANK[c.level] > CACHE_RANK[firm.level]
-      ? h("div", { class: "cache-sug", title: firm.why }, `set to ${cacheLabel(c.level)}; ${firm.src}: ${cacheLabel(firm.level)}`,
-          h("button", { class: "btn ghost", onclick: () => { p.cache.set(s.ref, firm.level); render(); } }, "Use"))
-      : null;
+    // Every member shows what the sources suggest, set or not. A level set above what was measured, or what follows
+    // from how CPA builds the request, stands out: pi would wait past the cache's end before warming.
+    const sug = p.deleted ? null : cacheSuggestion(s, model);
+    const adv = p.deleted ? null : cacheAdvice(c ? c.level : "", sug);
+    const sugEl = adv ? h("div", { class: "cache-sug" + (adv.tone === "quiet" ? " quiet" : ""),
+        title: sug ? sug.why : "No measurement in observed.json for this route and model, nothing known from how CPA builds the request, and no lifetime in models.dev. Pick a level yourself; to measure it, see github.com/ngvoicu/cache-ttl-probe." },
+      adv.text,
+      adv.use ? h("button", { class: "btn ghost", onclick: () => { p.cache.set(s.ref, adv.use); render(); } }, "Use") : null) : null;
     const lim = st ? st.per.get(sid) : null;
     const limEl = !st ? null : lim
       ? h("span", { class: "lim" + (lim.src ? " ext" : ""), title: lim.src
@@ -1558,7 +1572,7 @@ function poolCard(p) {
         h("div", { class: "src" }, h("span", { class: "name", title: srcLabel(s) }, srcLabel(s) + (s.disabled ? " (disabled)" : "")), cacheEl)),
       h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut,
         title: direct ? `Remove from pool. ${s.label} serves ${p.name} under that exact name, so saving makes it stop: an API key drops it from its model list; an account keeps it only through extra-pool aliases, or gets it excluded.` : "Remove from pool" }, "✕"),
-      sugEl, overEl,
+      sugEl,
       nocache ? h("div", { class: "cache-warn" }, "Doesn't cache: every message served here pays the full price.",
         h("button", { class: "btn ghost danger", disabled: p.deleted, onclick: leaveOut }, "Leave out")) : null,
       lowWhy ? h("div", { class: "limit-warn", title: "CPA reports one member's limits for the whole pool. A conversation that lands here can hit these lower limits." }, lowWhy,

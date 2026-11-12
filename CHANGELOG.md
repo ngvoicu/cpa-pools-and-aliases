@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.1.0 — 2026-11-11
+
+- **Every member shows its suggestion, set or not.** Under each member there is now always one line:
+  `suggested cache: 30 min (measured) · same as set` when your level matches, `… · set to 5 min` with *Use* when it
+  differs, the flagged `set to 30 min; measured: 5 min` when yours is above a measured or known value, and
+  `no suggestion: not measured or documented for this model here` when no source has anything. Hover for the run or
+  the reason. Nothing changes by itself, and *Use suggestions* still fills only what isn't set.
+- **New measurements show up within the hour.** The public data (`observed.json`, models.dev, OpenRouter's list) was
+  kept in the browser for a day; now for an hour.
+- A measured run's safe value decides its level even when the checks listed with it are all cold (a run that only
+  continues an earlier one with older ages).
+
 ## 2.0.0 — 2026-11-11
 
 **The plugin no longer holds any fact about a model.** Cache lifetimes and limits are your choices, stored in the
