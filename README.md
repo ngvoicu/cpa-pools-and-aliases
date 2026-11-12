@@ -180,7 +180,7 @@ entries) and **models.dev** (smaller value of each when both have it, e.g. GPT-6
 marked with their source. Only members found nowhere show *limits unknown*. The page fetches both lists in the
 background and keeps a compact extract in the browser for a day.
 
-- **The pool's limits are two fields you set** (`clients see: [922k] context · [128k] output`; type `922k`, `1M` or a
+- **The pool's limits are two fields you set** (`limits [922k] context [128k] output`; type `922k`, `1M` or a
   plain number). The **suggestion** next to them is the smallest value among the members: every member can handle a
   request that fits it. *Use* takes it; an empty field means the pool reports nothing and clients see whatever CPA says.
 - **A measured window wins over a catalog.** `observed.json` also holds context windows found by sending requests of
