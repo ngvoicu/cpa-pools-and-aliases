@@ -135,19 +135,20 @@ so it gets that member's cache; a conversation that moves to another member star
 - Before 2.0 the levels of Claude members were a rule inside the plugin (logins 1 hour, API keys 5 minutes) and were
   never stored. On upgrade nothing changes for clients: each Claude member starts with the lifetime its pool already
   reported, the review lists them (`as before; now stored like every other level`), and the next save stores them.
-- The pool's line shows the one lifetime the pool gets, which is what clients are told: `cache: 1 hour`. When the
-  members differ it is the shortest, in red (`cache: 5 min`); mixed pools work, clients that refresh caches (pi)
+- The pool shows the one lifetime it gets, which is what clients are told: `cache 1 hour`. When the
+  members differ it is the shortest, in red (`cache 5 min`); mixed pools work, clients that refresh caches (pi)
   just plan for the shortest. Hover for the range.
 - A pool gets a lifetime only when **every member has a level and caches**. With a member that doesn't cache, or a
-  level not set, the line reads `cache: none` in red. A client can't tell which member serves it, and with a
-  lifetime it would pay to keep a cache warm on a member that has none.
+  level not set, it reads `cache no cache` or `cache not set` in red: the same words as a member's level. A client
+  can't tell which member serves it, and with a lifetime it would pay to keep a cache warm on a member that has
+  none.
 - **No cache** marks a member whose conversations pay the full price on every message (for example Claude through an
   OpenAI-compatible OpenRouter entry, which gets no cache markers). The member is highlighted, the review warns about
   it, *Leave out* removes it, and it doesn't rejoin automatically.
 
-Every member shows what the sources **suggest**, whether or not its level is set: `suggested cache: 30 min (measured)`
-with one-click *Use* when there is no level yet, `… · same as set` when yours matches, `… · set to 5 min` with *Use*
-when it differs, and `no suggestion: not measured or documented for this model here` when no source has anything.
+Next to every member's level the page shows what the sources **suggest**: `✓ measured` when your level matches,
+`measured: 30 min` with one-click *Use* when it differs or no level is set, and `no data` when no source has
+anything. Hover for the run or the reason.
 *Use suggestions* fills everything a pool hasn't set yet and never changes a level you set. The suggestion comes
 from, in this order:
 
@@ -164,7 +165,7 @@ from, in this order:
    no cache markers, so models that only cache on request (Claude) are suggested *no cache* there, while models that
    cache automatically keep their documented lifetime.
 
-A level you set **above** the measured or known one is flagged (`set to 30 min; measured: 5 min`) with *Use*; hover
+A level you set **above** the measured or known one is flagged in yellow (`measured: 5 min`) with *Use*; hover
 for the run or the reason behind it. Suggestions count only once you accept them. The public data is kept in the
 browser for an hour, so a new measurement shows up the same day. To add measurements for your own routes, see
 [cache-ttl-probe](https://github.com/ngvoicu/cache-ttl-probe).
@@ -180,7 +181,7 @@ entries) and **models.dev** (smaller value of each when both have it, e.g. GPT-6
 marked with their source. Only members found nowhere show *limits unknown*. The page fetches both lists in the
 background and keeps a compact extract in the browser for a day.
 
-- **The pool's limits are two fields you set** (`clients see: [922k] context · [128k] output`; type `922k`, `1M` or a
+- **The pool's limits are two fields you set** (`limits [922k] context [128k] output`; type `922k`, `1M` or a
   plain number). The **suggestion** next to them is the smallest value among the members: every member can handle a
   request that fits it. *Use* takes it; an empty field means the pool reports nothing and clients see whatever CPA says.
 - **A measured window wins over a catalog.** `observed.json` also holds context windows found by sending requests of
@@ -209,9 +210,10 @@ shows the **last hour** (or the last day when the last hour had none) on every m
 refreshes them every minute. Until a window is complete it is labelled by its start (`since 23:12`) instead of "last
 hour" or "last 24 h". The tooltip has the requests, failures and tokens read and written.
 
-Every member has the line, in one shape: `hits 98% · 24 h`. When there is no rate it says why: `no requests`,
-`3 failed`, or `tiny prompts` when the prompts average under 1,024 tokens, which is below what most providers cache
-at all (test pings would otherwise read as a 0% cache). A real 0% on larger prompts is shown and flagged.
+Every pool and member has it, in one shape: `hits 98% · 24 h`, or `hits –` when there is no rate: no requests,
+or prompts that average under 1,024 tokens, which is below what most providers cache at all (test pings would
+otherwise read as a 0% cache). `– · 3 failed` means every request failed. The tooltip says which. A real 0% on
+larger prompts is shown and flagged.
 
 **Keeping the counts across restarts.** By default the counts live in memory and start again when CPA or the plugin
 restarts. To keep them, name a file in the plugin's config:

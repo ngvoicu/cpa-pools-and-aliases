@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.2.0 — 2026-11-13
+
+**One layout for every card: the same three labels, in the same order, on pools and on members.**
+
+- **Pool:** `cache 30 min` · `limits [872k] context [128k] output` · `hits 98% · 24 h`, as a small table under the
+  pool's name. The cache value uses the same words as a member's level (`not set`, `no cache`, `5 min`, …) and is
+  red when the members differ or the pool gets no lifetime.
+- **Member:** model, account, then one line: `cache [30 min] ✓ measured` · `limits 915k / 128k` · `hits 98% · 24 h`.
+- **Suggestions sit next to the level** instead of on their own line: `✓ measured` when your level matches,
+  `measured: 5 min` with *Use* when it differs (yellow when yours is above a measured or known value), `no data`
+  when no source has anything.
+- **Hits are a value or a dash.** `98% · 24 h`, or `–` when there is no rate (no requests, or prompts too small to
+  be cached); `– · 3 failed` when every request failed. The reason and the counts are in the tooltip. The pool
+  shows one window, like its members.
+- Where a member's limits come from (CPA's catalog, a measurement, OpenRouter, models.dev) moved to the tooltip.
+
+Page only. Nothing that is stored or reported changed.
+
 ## 2.1.3 — 2026-11-12
 
 - **The pool's cache line is one value: what the pool gets.** `cache: 1 hour` when the members agree; the shortest
