@@ -184,4 +184,18 @@ assert.deepEqual(line(["2h", "30m", "none", "none", ""]), ["cache: no lifetime r
 assert.deepEqual(line(["", ""]), ["cache: no lifetime reported to clients", "2 cache levels not set"]);
 assert.equal(page.cacheSummaryParts(["5m", "none"])[0].cls, "bad"); assert.equal(page.cacheSummaryParts(["5m", ""])[0].cls, "unk");
 
+// cache hits: every member gets a line of the same shape, and a rate only when it can say something
+const hits = new Function([pick(/^const HITS_LOW = .*$/m, "HITS_LOW"), pick(/\/\/ >>> hits[\s\S]*?\/\/ <<< hits/, "hits block"), "return { hitsRate, hitsLabel };"].join("\n"))();
+const counts = (requests, failed, prompt, read) => ({ requests, failed, prompt, read, write: 0 });
+assert.deepEqual(hits.hitsLabel(counts(166, 0, 7600000, 7450000), "24 h"), { text: "hits 98% · 24 h", low: false, why: "" });
+assert.equal(hits.hitsLabel(counts(181, 0, 5000000, 4950000), "1 h").text, "hits 99% · 1 h", "the window is always shown");
+assert.deepEqual(hits.hitsLabel(counts(40, 0, 900000, 90000), "24 h"), { text: "hits 10% · 24 h", low: true, why: "" });
+assert.deepEqual(hits.hitsLabel(counts(6, 0, 858, 0), "24 h"), { text: "hits – · tiny prompts · 24 h", low: false, why: "small" },
+  "six test pings must not read as a 0% cache");
+assert.deepEqual(hits.hitsLabel(counts(4, 4, 0, 0), "24 h"), { text: "hits – · 4 failed · 24 h", low: false, why: "failed" });
+assert.deepEqual(hits.hitsLabel(counts(0, 0, 0, 0), "24 h"), { text: "hits – · no requests · 24 h", low: false, why: "none" });
+assert.equal(hits.hitsLabel(counts(0, 0, 0, 0), "since 23:12").text, "hits – · no requests · since 23:12");
+assert.equal(hits.hitsRate(counts(10, 2, 400000, 200000)).rate, 50, "failed requests don't count toward the average size");
+assert.equal(hits.hitsRate(counts(3, 0, 40000, 0)).rate, 0, "a real 0% on cacheable prompts is still shown");
+
 console.log("page tests passed");

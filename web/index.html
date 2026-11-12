@@ -108,6 +108,7 @@ input:focus, select:focus { border-color: var(--accent); }
 .pool-hits:empty, .member .hits:empty { display: none; }
 .member .hits { white-space: nowrap; color: var(--muted); font: 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
 .pool-hits.low, .member .hits.low { color: var(--warn); }
+.member .hits.idle { color: var(--faint); }
 .member .lim.ext { text-decoration: underline dotted; text-underline-offset: 3px; }
 .member .cache-sug { grid-column: 2 / 4; font-size: 12px; color: var(--warn); display: flex; align-items: center; gap: 8px; }
 .member .cache-sug.quiet { color: var(--faint); }
@@ -678,15 +679,42 @@ function poolHits(poolKey) {
   }
   return { bySid, total };
 }
-const pct = (c) => (c.prompt ? Math.round((100 * c.read) / c.prompt) : null);
+// >>> hits
+// A hit rate is shown only when it can say something about the cache. Prompts that average under about a thousand
+// tokens (test pings, "say OK") are below what most providers cache at all: they would read as 0% whatever the
+// cache does. Requests that all failed have no prompt to count.
+const HITS_MIN_PROMPT = 1024;
+function hitsRate(c) {
+  const ok = c ? c.requests - c.failed : 0;
+  if (!c || !c.requests) return { rate: null, why: "none" };
+  if (ok <= 0 || !c.prompt) return { rate: null, why: "failed" };
+  if (c.prompt / ok < HITS_MIN_PROMPT) return { rate: null, why: "small" };
+  return { rate: Math.round((100 * c.read) / c.prompt), why: "" };
+}
+const pct = (c) => hitsRate(c).rate;
+// Every member shows the same shape, "hits <rate> · <window or reason>", so a missing rate is explained instead
+// of leaving the row empty. `win` is the short window label: "1 h", "24 h" or "since 23:12".
+function hitsLabel(c, win) {
+  const { rate, why } = hitsRate(c);
+  if (why === "none") return { text: `hits – · no requests · ${win}`, low: false, why };
+  if (why === "failed") return { text: `hits – · ${c.failed} failed · ${win}`, low: false, why };
+  if (why === "small") return { text: `hits – · tiny prompts · ${win}`, low: false, why };
+  return { text: `hits ${rate}% · ${win}`, low: rate < HITS_LOW * 100, why };
+}
+// <<< hits
 function hitText(c) {
-  const p = pct(c);
-  return `${p === null ? "–" : p + "%"} (${c.requests} request${c.requests === 1 ? "" : "s"})`;
+  const { rate, why } = hitsRate(c);
+  const n = `${c.requests} request${c.requests === 1 ? "" : "s"}`;
+  return `${rate === null ? "–" : rate + "%"} (${n}${why === "small" ? ", too small to judge" : why === "failed" ? ", all failed" : ""})`;
 }
 function hitTitle(c, when) {
+  const why = hitsRate(c).why;
   return `${when}: ${c.requests} request${c.requests === 1 ? "" : "s"}${c.failed ? `, ${c.failed} failed` : ""}. ` +
     `${fmtTok(c.read)} of ${fmtTok(c.prompt)} prompt tokens read from the cache, ${fmtTok(c.write)} written to it. ` +
-    "The first message of a conversation always misses; a low rate on a busy member means its cache expires between messages.";
+    (why === "small" ? "No rate is shown: these prompts average under 1,024 tokens, below what most providers cache at all, so a rate would say nothing about the cache."
+      : why === "failed" ? "No rate is shown: every request failed, so there was no prompt to count."
+      : why === "none" ? "No rate is shown: this member served no request in the window."
+      : "The first message of a conversation always misses; a low rate on a busy member means its cache expires between messages.");
 }
 // Counting can be younger than a window (a restart without a stats-file, or a new install): label the window by
 // the start time instead ("since 23:12"). Under an hour old, the hour and the day hold the same requests.
@@ -732,11 +760,12 @@ function fillHits() {
     const ph = poolHits(el.dataset.pool);
     const x = ph && ph.bySid.get(el.dataset.sid);
     el.textContent = ""; el.title = ""; el.className = "hits";
-    if (!x || !x.day.requests) continue;
-    const [c, when, short] = pick(x, w);
-    const p = pct(c);
-    el.textContent = `hits ${p === null ? "–" : p + "%"}` + (x.hour.requests ? "" : ` · ${short}`);
-    el.classList.toggle("low", p !== null && p < HITS_LOW * 100);
+    if (!S || !S.hits) continue; // no counts at all (an older plugin library): nothing to say
+    const [c, when, short] = pick(x || { hour: noCounts(), day: noCounts() }, w);
+    const label = hitsLabel(c, short);
+    el.textContent = label.text;
+    el.classList.toggle("low", label.low);
+    el.classList.toggle("idle", label.why !== "");
     el.title = hitTitle(c, when);
   }
 }
