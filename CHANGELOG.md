@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The public measurements have a new home: the `cache-ttl-probe` repository is now
+  [`groundtruth`](https://github.com/ngvoicu/groundtruth). The old address still answers, so installed versions keep
+  getting suggestions.
+
 ## 2.2.0 — 2026-11-13
 
 **One layout for every card: the same three labels, in the same order, on pools and on members.**
@@ -62,7 +68,7 @@ plugin's config; everything else only suggests.
 
 - **Claude members have a level like everyone else.** The rule "logins 1 hour, API keys 5 minutes" is gone from the
   page. It now arrives as a suggestion from the `known` list of
-  [`observed.json`](https://github.com/ngvoicu/cache-ttl-probe/blob/main/observed.json), with its reason.
+  [`observed.json`](https://github.com/ngvoicu/groundtruth/blob/main/observed.json), with its reason.
   **Upgrading changes nothing for clients:** each Claude member starts with the lifetime its pool already reported,
   the review lists them, and the next save stores them.
 - **A pool's context window and output limit are two fields you set.** They were computed and saved automatically.
@@ -82,7 +88,7 @@ suggestions*. The config format is unchanged, so going back to 1.8 works.
 ## 1.8.0 — 2026-11-11
 
 - **Cache levels are suggested from measurements first.** The page now reads
-  [`observed.json`](https://github.com/ngvoicu/cache-ttl-probe/blob/main/observed.json), public measurements of how
+  [`observed.json`](https://github.com/ngvoicu/groundtruth/blob/main/observed.json), public measurements of how
   long each route really keeps a prompt cache, and suggests a member's level from a run on the **same route and
   model, made through CPA**. A documented lifetime from models.dev is only the fallback. Before, a Devin member
   serving GPT-6 Astra was suggested OpenAI's 30 minutes; measured through Devin it is 5.

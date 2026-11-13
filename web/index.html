@@ -843,11 +843,11 @@ function publicLimits(s, model) {
   return { ctx: min(v[0], md && md.ctx), out: min(v[1], md && md.out), src: md ? "OpenRouter + models.dev" : "OpenRouter" };
 }
 // >>> measured-cache
-// Measured cache lifetimes: https://github.com/ngvoicu/cache-ttl-probe publishes observed.json, one entry per run
+// Measured cache lifetimes: https://github.com/ngvoicu/groundtruth publishes observed.json, one entry per run
 // (route, model, warm checks per wait time). A member's level is suggested from a run on the same route and model
 // made through CPA; the documented lifetime (models.dev) is only the fallback, because resellers and subscription
 // routes often keep a cache for less time than the model's own vendor documents.
-const OBSERVED_URL = "https://raw.githubusercontent.com/ngvoicu/cache-ttl-probe/main/observed.json";
+const OBSERVED_URL = "https://raw.githubusercontent.com/ngvoicu/groundtruth/main/observed.json";
 const OBS_CLIENTS = { "pi+cliproxyapi": "pi through CPA", cliproxyapi: "plain requests through CPA", direct: "plain requests straight to the provider" };
 // Compact rows: [route, model key, client, date, run id, safe seconds, control (1 warm, 0 cold, -1 none), checks, retention, lacks]
 function observedExtract(doc) {
@@ -969,7 +969,7 @@ function measuredCache(s, model) {
     : "the cache was not reliable even at 5 minutes";
   const counts = best.checks.map((c) => `${c[0]} ${c[1]}/${c[2]}`).join(", ");
   return { level, src: "measured", id: best.id, date: best.date,
-    why: `Measured on ${best.date}, ${OBS_CLIENTS[best.client]}: ${verdict}${counts ? ` (warm checks per wait: ${counts})` : ""}. Run ${best.id} in github.com/ngvoicu/cache-ttl-probe.` };
+    why: `Measured on ${best.date}, ${OBS_CLIENTS[best.client]}: ${verdict}${counts ? ` (warm checks per wait: ${counts})` : ""}. Run ${best.id} in github.com/ngvoicu/groundtruth.` };
 }
 // What a member shows next to its cache level, always: where a suggestion comes from and, when it differs from the
 // level set, its value. `set` is the member's level ("" when not set); `sug` a suggestion ({ level, src }) or null.
@@ -1578,7 +1578,7 @@ function poolCard(p) {
     const sug = p.deleted ? null : cacheSuggestion(s, model);
     const adv = p.deleted ? null : cacheAdvice(c ? c.level : "", sug);
     const sugEl = adv ? h("span", { class: "sug" + (adv.tone === "warn" ? " warn" : ""),
-        title: sug ? `Suggested: ${cacheLabel(sug.level)}. ${sug.why}` : "No suggestion: no measurement in observed.json for this route and model, nothing known from how CPA builds the request, and no lifetime in models.dev. Pick a level yourself; to measure it, see github.com/ngvoicu/cache-ttl-probe." },
+        title: sug ? `Suggested: ${cacheLabel(sug.level)}. ${sug.why}` : "No suggestion: no measurement in observed.json for this route and model, nothing known from how CPA builds the request, and no lifetime in models.dev. Pick a level yourself; to measure it, see github.com/ngvoicu/groundtruth." },
       adv.text,
       adv.use ? h("button", { class: "btn ghost", onclick: () => { p.cache.set(s.ref, adv.use); render(); } }, "Use") : null) : null;
     const lim = st ? st.per.get(sid) : null;

@@ -152,7 +152,7 @@ anything. Hover for the run or the reason.
 *Use suggestions* fills everything a pool hasn't set yet and never changes a level you set. The suggestion comes
 from, in this order:
 
-1. **Measured, when there is a measurement.** [`observed.json`](https://github.com/ngvoicu/cache-ttl-probe/blob/main/observed.json)
+1. **Measured, when there is a measurement.** [`observed.json`](https://github.com/ngvoicu/groundtruth/blob/main/observed.json)
    holds public measurements of how long each route really keeps a cache. A run on the same route and model, made
    through CPA, decides: the level at or below the longest wait at which every check still found the cache. Routes
    covered: Codex, Devin, Meta and Antigravity logins, OpenRouter entries, OpenAI API keys. A vendor's documented
@@ -168,7 +168,7 @@ from, in this order:
 A level you set **above** the measured or known one is flagged in yellow (`measured: 5 min`) with *Use*; hover
 for the run or the reason behind it. Suggestions count only once you accept them. The public data is kept in the
 browser for an hour, so a new measurement shows up the same day. To add measurements for your own routes, see
-[cache-ttl-probe](https://github.com/ngvoicu/cache-ttl-probe).
+[groundtruth](https://github.com/ngvoicu/groundtruth).
 
 The levels are information for you: the plugin doesn't change any request.
 
