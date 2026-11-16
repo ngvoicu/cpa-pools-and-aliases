@@ -999,7 +999,7 @@ function cacheSummaryParts(levels) {
     if (unset) why.push(count(unset, "member has no cache level set", "members have no cache level set"));
     if (cached.length) why.push(`${count(cached.length, "member caches", "members cache")} ${lo === hi ? cacheLabel(lo) : cacheLabel(lo) + " – " + cacheLabel(hi)}`);
     return [{ cls: "bad", text: unset ? "not set" : "no cache",
-      title: `${why.join("; ")}. A pool gets a cache lifetime only when every member has a level and caches: a client can't tell which member serves it, and with a lifetime it would pay to keep a cache warm on a member that has none. So clients (pi) are told nothing and don't warm this pool's cache.` }];
+      title: `${why.join("; ")}. A pool gets a cache lifetime only when every member has a level and caches: a client can't tell which member serves it, and with a lifetime it would pay to keep a cache warm on a member that has none. So the pool reports no cache lifetime, and what a client does without one is up to the client: pi's CPA extension then uses its own value for models it knows, so it may still warm this pool's cache.` }];
   }
   if (lo !== hi) {
     return [{ cls: "bad", text: cacheLabel(lo),

@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 2.2.1 — 2026-11-16
 
+- **The tooltip of a pool without a cache lifetime no longer says it isn't warmed.** With a member that doesn't
+  cache or has no level set, it said clients (pi) are told nothing and don't warm the pool's cache. The plugin does
+  report no lifetime, but what a client does then is up to the client: pi's CPA extension uses its own value for
+  models it knows, so it may still warm. The tooltip now says that. Page text only; what is reported did not change.
 - The public measurements have a new home: the `cache-ttl-probe` repository is now
   [`groundtruth`](https://github.com/ngvoicu/groundtruth). The old address still answers, so installed versions keep
   getting suggestions.
